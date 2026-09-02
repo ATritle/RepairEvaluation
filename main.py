@@ -1439,12 +1439,21 @@ class RepairEvaluationWindow(QMainWindow):
         # Left column: Date, Customer, Customer PO, Make/Model, Technician
         # Right column: Repair #, Customer Contact + Customer Email,
         # Customer Part Number, Serial Number
+        # The application stores dates as ISO (YYYY-MM-DD), but PDFs must
+        # display dates as MM/DD/YYYY.
+        pdf_date = ""
+        if data["date"]:
+            try:
+                pdf_date = __import__("datetime").datetime.strptime(
+                    data["date"], "%Y-%m-%d"
+                ).strftime("%m/%d/%Y")
+            except ValueError:
+                pdf_date = data["date"]
+
         info = [
             [
                 Paragraph("<b>Date</b>", label_style),
-                __import__("datetime").datetime.strptime(
-                    data["date"], "%Y-%m-%d"
-                ).strftime("%m/%d/%Y") if data["date"] else "",
+                pdf_date,
                 Paragraph("<b>Repair #</b>", label_style),
                 data["repair_no"],
                 "",
