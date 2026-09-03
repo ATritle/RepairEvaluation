@@ -11,7 +11,7 @@ the repo and unchanged.
 ### Quick start (Windows)
 
 Double-click `run_web.bat`. It creates a `.venv`, installs `requirements.txt`,
-starts the server on http://localhost:8000 and opens your browser.
+starts the server on http://localhost:6969 and opens your browser.
 
 ### Manual start
 
@@ -19,10 +19,10 @@ starts the server on http://localhost:8000 and opens your browser.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 6969
 ```
 
-Open http://localhost:8000.
+Open http://localhost:6969.
 
 ### What the web version does
 
@@ -86,7 +86,7 @@ main.py           original desktop app (PyQt6)
 | POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
 | GET | `/api/reports/{id}/pdf` | build a PDF from a saved report |
 
-Interactive docs: http://localhost:8000/docs
+Interactive docs: http://localhost:6969/docs
 
 ---
 

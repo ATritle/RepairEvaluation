@@ -1,6 +1,6 @@
 """FastAPI entry point for the IFP Repair Evaluation web app.
 
-Run:  uvicorn app.main:app --reload --port 8000
+Run:  uvicorn app.main:app --host 0.0.0.0 --port 6969
 or:   python -m app.main
 """
 import tempfile
@@ -140,4 +140,4 @@ async def api_report_pdf(report_id: str, download: bool = False) -> Response:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=6969, reload=False)

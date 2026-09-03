@@ -13,8 +13,8 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo.
-echo Starting IFP Repair Evaluation web server at http://localhost:8000
+echo Starting IFP Repair Evaluation web server at http://localhost:6969
 echo Press Ctrl+C to stop.
 echo.
-start "" http://localhost:8000
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+start "" http://localhost:6969
+python -m uvicorn app.main:app --host 0.0.0.0 --port 6969
