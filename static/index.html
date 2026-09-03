@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IFP Repair Evaluation</title>
+<link rel="icon" href="/assets/ifp_logo_app.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <img src="/assets/ifp_logo_app.png" alt="IFP" class="logo">
+    <div>
+      <h1 class="main-title">REPAIR EVALUATION</h1>
+      <div class="subtitle">IFP Motion Solutions — Service / Repair Documentation</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="menu">
+      <button class="btn" id="btn-help-menu">Help ▾</button>
+      <div class="menu-items" id="help-menu" hidden>
+        <button data-help="how">How to Use <span class="kbd">F1</span></button>
+        <button data-help="markup">Photo Markup</button>
+        <button data-help="shortcuts">Keyboard Shortcuts</button>
+        <hr>
+        <button data-help="about">About IFP Repair Evaluation</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<nav class="toolbar">
+  <button class="btn" id="btn-new">New</button>
+  <button class="btn" id="btn-open">Open</button>
+  <button class="btn" id="btn-save">Save</button>
+  <button class="btn" id="btn-preview">Preview PDF</button>
+  <button class="btn primary" id="btn-export">Print / Save PDF</button>
+  <span class="status" id="status"></span>
+  <span class="dirty" id="dirty" hidden>● Unsaved changes</span>
+</nav>
+
+<main class="content">
+  <div class="section">REPAIR INFORMATION</div>
+  <div class="info-grid">
+    <label class="field">
+      <span>Date</span>
+      <input type="date" id="f-date">
+    </label>
+    <label class="field">
+      <span>Repair #</span>
+      <input type="text" id="f-repair_no" placeholder="R123456">
+    </label>
+
+    <label class="field">
+      <span>Customer</span>
+      <input type="text" id="f-customer">
+    </label>
+    <div class="field-pair">
+      <label class="field">
+        <span>Customer Contact</span>
+        <input type="text" id="f-customer_contact">
+      </label>
+      <label class="field">
+        <span>Customer Email</span>
+        <input type="email" id="f-customer_email">
+      </label>
+    </div>
+
+    <label class="field">
+      <span>Customer PO</span>
+      <input type="text" id="f-customer_po">
+    </label>
+    <label class="field">
+      <span>Customer Part Number</span>
+      <input type="text" id="f-material">
+    </label>
+
+    <label class="field">
+      <span>Make / Model</span>
+      <input type="text" id="f-model">
+    </label>
+    <label class="field">
+      <span>Serial Number / Previous Repair Number</span>
+      <input type="text" id="f-serial">
+    </label>
+
+    <label class="field">
+      <span>Technician</span>
+      <select id="f-technician"></select>
+    </label>
+  </div>
+
+  <div class="section">CUSTOMER REQUEST / REPORTED PROBLEM</div>
+  <textarea id="f-customer_request" rows="5"></textarea>
+
+  <div class="section">REPAIR EVALUATION / FINDINGS</div>
+  <textarea id="f-findings" rows="8"></textarea>
+
+  <div class="section">PHOTOGRAPHIC DOCUMENTATION</div>
+  <div class="photo-toolbar">
+    <button class="btn primary" id="btn-add-photo">+ ADD PHOTO</button>
+    <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.bmp,.webp" multiple hidden>
+    <span class="muted" id="photo-count">0 photos</span>
+  </div>
+  <div id="photo-area" class="photo-area"></div>
+</main>
+
+<!-- Photo card template -->
+<template id="photo-card-tpl">
+  <div class="photo-card">
+    <div class="card-top">
+      <span class="photo-title"></span>
+      <span class="spacer"></span>
+      <label class="inline">Add Symbol:
+        <select class="symbol-select"></select>
+      </label>
+      <label class="inline">Size:
+        <input type="number" class="size-input" min="25" max="300" step="10" value="250"
+               title="Set the size of the next symbol, or resize the selected symbol.">%
+      </label>
+      <button class="btn small clear-markups">Clear Markups</button>
+      <button class="btn small move-up" title="Move up">↑</button>
+      <button class="btn small move-down" title="Move down">↓</button>
+      <button class="btn small remove">Remove</button>
+    </div>
+    <div class="card-body">
+      <div class="canvas-wrap">
+        <canvas class="photo-canvas" tabindex="0"></canvas>
+      </div>
+      <div class="card-side">
+        <div class="file-name muted"></div>
+        <label class="field">
+          <span>Description</span>
+          <textarea class="description" rows="6"></textarea>
+        </label>
+        <div class="btn-row">
+          <button class="btn rotate-left">Rotate 90° Left</button>
+          <button class="btn rotate-right">Rotate 90° Right</button>
+        </div>
+        <button class="btn reset-rotation">Reset Rotation</button>
+        <button class="btn open-zoom">Open Photo / Zoom</button>
+        <div class="hint muted">Click on the image to place the selected symbol. Click a symbol to select it, drag to move, Delete to remove, Esc to deselect.</div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- Open dialog -->
+<div class="modal" id="modal-open" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>Open Repair Evaluation</h2>
+      <button class="btn small" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <table class="report-table">
+        <thead>
+          <tr><th>Repair #</th><th>Customer</th><th>Date</th><th>Technician</th><th>Photos</th><th>Saved</th><th></th></tr>
+        </thead>
+        <tbody id="report-list"></tbody>
+      </table>
+      <div class="muted" id="report-empty" hidden>No saved evaluations yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Zoom dialog -->
+<div class="modal" id="modal-zoom" hidden>
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h2>Photo Zoom / Markup</h2>
+      <button class="btn small" data-close>✕</button>
+    </div>
+    <div class="zoom-canvas-wrap" id="zoom-wrap">
+      <canvas id="zoom-canvas" tabindex="0"></canvas>
+    </div>
+    <div class="modal-foot">
+      <label class="inline">Add Symbol: <select id="zoom-symbol"></select></label>
+      <label class="inline">Size: <input type="number" id="zoom-size" min="25" max="300" step="10" value="250">%</label>
+      <label class="inline zoom-slider">Zoom:
+        <input type="range" id="zoom-range" min="25" max="300" value="100">
+        <span id="zoom-label">100%</span>
+      </label>
+      <button class="btn" id="zoom-reset">Reset Zoom</button>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF preview -->
+<div class="modal" id="modal-pdf" hidden>
+  <div class="modal-box wide tall">
+    <div class="modal-head">
+      <h2>PDF Preview</h2>
+      <div class="btn-row">
+        <button class="btn" id="pdf-open-tab">Open in New Tab</button>
+        <button class="btn primary" id="pdf-download">Download PDF</button>
+        <button class="btn small" data-close>✕</button>
+      </div>
+    </div>
+    <iframe id="pdf-frame" title="PDF preview"></iframe>
+  </div>
+</div>
+
+<!-- Help dialog -->
+<div class="modal" id="modal-help" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="brand">
+        <img src="/assets/ifp_logo_app.png" alt="IFP" class="logo small">
+        <h2>IFP Repair Evaluation</h2>
+      </div>
+      <button class="btn small" data-close>✕</button>
+    </div>
+    <div class="tabs" id="help-tabs">
+      <button data-tab="how" class="active">How to Use</button>
+      <button data-tab="markup">Photo Markup</button>
+      <button data-tab="shortcuts">Keyboard Shortcuts</button>
+      <button data-tab="about">About</button>
+    </div>
+    <div class="modal-body help-body">
+      <section data-panel="how">
+        <h3>How to Use</h3>
+        <p>Use this application to document a repair evaluation and produce a professional PDF report.</p>
+        <h4>1. Enter Repair Information</h4>
+        <ul>
+          <li>Enter the <b>Repair #</b> manually.</li>
+          <li>Enter the date, customer, contact, customer PO, customer part number, make/model, serial number and technician.</li>
+        </ul>
+        <h4>2. Document the Evaluation</h4>
+        <ul>
+          <li><b>Customer Request / Reported Problem</b> — describe what the customer reported or requested.</li>
+          <li><b>Repair Evaluation / Findings</b> — document inspection results, measurements, damage and other findings.</li>
+        </ul>
+        <h4>3. Add Photos</h4>
+        <p>Use <b>Add Photo</b> to attach inspection photographs. Each photo can have its own description and can be rotated.</p>
+        <h4>4. Mark Up Photos</h4>
+        <p>Select a symbol from <b>Add Symbol</b>, then click on the photo where the symbol should be placed. Symbols are included in the PDF.</p>
+        <h4>5. Preview and Export</h4>
+        <p>Use <b>Preview PDF</b> to review the report. Use <b>Print / Save PDF</b> to download the finished report.</p>
+        <h4>6. Save Your Evaluation</h4>
+        <p>Save the evaluation to the server if you want to reopen or modify the report later. Use <b>Open</b> to reload it.</p>
+      </section>
+      <section data-panel="markup" hidden>
+        <h3>Photo Markup Guide</h3>
+        <h4>Place a Symbol</h4>
+        <p>Choose a symbol from <b>Add Symbol</b>, then click anywhere on the image. The symbol is placed at that location.</p>
+        <h4>Resize a Symbol</h4>
+        <p>Click an existing symbol to select it. Use the <b>Size</b> control to change its size. The selected symbol is highlighted in yellow.</p>
+        <h4>Move a Symbol</h4>
+        <p>Click and drag an existing symbol to move it.</p>
+        <h4>Remove a Symbol</h4>
+        <p>Select a symbol and press <b>Delete</b>, or use <b>Clear Markups</b> to remove all symbols from the photo.</p>
+        <h4>Zoom</h4>
+        <p>Use <b>Open Photo / Zoom</b> to enlarge the image while positioning markups. Zooming changes the view only; it does not change the underlying photograph.</p>
+        <h4>Available Symbols</h4>
+        <ul>
+          <li>Arrow Up / Right / Down / Left</li>
+          <li>Circle</li><li>Square</li><li>Rectangle</li><li>X</li><li>Check Mark</li>
+        </ul>
+        <p><b>Tip:</b> Place the point of an arrow directly on the area you want the report reader to notice.</p>
+      </section>
+      <section data-panel="shortcuts" hidden>
+        <h3>Keyboard Shortcuts</h3>
+        <table class="shortcut-table">
+          <tr><td><b>Ctrl + N</b></td><td>New evaluation</td></tr>
+          <tr><td><b>Ctrl + O</b></td><td>Open evaluation</td></tr>
+          <tr><td><b>Ctrl + S</b></td><td>Save evaluation</td></tr>
+          <tr><td><b>Ctrl + P</b></td><td>PDF Preview</td></tr>
+          <tr><td><b>F1</b></td><td>Help</td></tr>
+          <tr><td><b>Delete</b></td><td>Remove a selected photo markup</td></tr>
+          <tr><td><b>Esc</b></td><td>Deselect a selected markup / close dialog</td></tr>
+        </table>
+      </section>
+      <section data-panel="about" hidden class="about">
+        <img src="/assets/ifp_logo_app.png" alt="IFP" class="logo large">
+        <h2>IFP Repair Evaluation</h2>
+        <p><b>IFP Motion Solutions</b></p>
+        <p>Repair evaluation and photographic documentation tool</p>
+        <p id="about-version">Web Version</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

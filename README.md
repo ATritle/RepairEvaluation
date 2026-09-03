@@ -1,5 +1,97 @@
 # IFP Repair Evaluation App
 
+Documents repair evaluations and generates professional PDF reports.
+
+This branch (**Web-Version**) adds a browser-based version that runs on a local
+web server (FastAPI). The original PyQt6 desktop app (`main.py`) is still in
+the repo and unchanged.
+
+## Web version (localhost)
+
+### Quick start (Windows)
+
+Double-click `run_web.bat`. It creates a `.venv`, installs `requirements.txt`,
+starts the server on http://localhost:8000 and opens your browser.
+
+### Manual start
+
+```
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+Open http://localhost:8000.
+
+### What the web version does
+
+Same workflow as the desktop app:
+
+- Repair information grid (same fields and layout, fixed technician list)
+- Customer Request / Reported Problem and Repair Evaluation / Findings
+- Unlimited photos (file picker or drag-and-drop onto the page), reorder, remove
+- Rotate 90° left/right, reset rotation
+- Photo markup on an HTML canvas: arrows, circle, square, rectangle, X, check
+  mark; click to place, click to select, drag to move, Delete to remove,
+  Size 25–300 % (default 250 %), Clear Markups
+- Open Photo / Zoom dialog with a 25–300 % zoom slider
+- Save / Open evaluations (stored on the server, see below)
+- Preview PDF (in-page viewer) and Print / Save PDF (download)
+- Help menu (How to Use, Photo Markup, Keyboard Shortcuts, About)
+- Shortcuts: Ctrl+S save, Ctrl+O open, Ctrl+P preview, F1 help
+  (Ctrl+N is usually taken by the browser)
+
+The PDF layout and symbol geometry are ported line-for-line from the desktop
+app, so reports look the same.
+
+### Where data is stored
+
+Everything lives under `data/` next to the app (ignored by git):
+
+```
+data/photos/<uuid>.jpg      normalised photos (2000 px max edge, JPEG q82)
+data/reports/<id>.json      saved evaluations
+```
+
+Photos are optimised on upload exactly like the desktop app (EXIF orientation
+applied, alpha flattened to white, resized, progressive JPEG).
+
+### Layout
+
+```
+app/
+  main.py         FastAPI app + API routes
+  config.py       paths, technician list, symbol list
+  schemas.py      Pydantic models (Report, Photo, Annotation)
+  storage.py      JSON report storage
+  images.py       photo normalisation
+  pdf_builder.py  ReportLab PDF (ported from main.py)
+static/
+  index.html, style.css, app.js   the browser UI
+assets/           logos (shared with the desktop app)
+main.py           original desktop app (PyQt6)
+```
+
+### API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/config` | technicians + symbols |
+| GET | `/api/reports` | list saved evaluations |
+| GET | `/api/reports/{id}` | load one |
+| POST | `/api/reports` | create/update (body = report JSON) |
+| DELETE | `/api/reports/{id}` | delete |
+| POST | `/api/photos` | upload one or more images (multipart `files`) |
+| POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
+| GET | `/api/reports/{id}/pdf` | build a PDF from a saved report |
+
+Interactive docs: http://localhost:8000/docs
+
+---
+
+# Desktop version (original)
+
 A Windows desktop application for documenting repair evaluations and generating professional PDF reports.
 
 ## Features
@@ -31,7 +123,7 @@ A Windows desktop application for documenting repair evaluations and generating 
 
 5. Install dependencies:
 
-   `pip install -r requirements.txt`
+   `pip install -r requirements-desktop.txt`
 
 6. Start the application:
 
