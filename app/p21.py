@@ -27,9 +27,12 @@ ORDER BY
     c.customer_name
 """
 
-# Contacts attached to the customer's corporate address (contacts.address_id =
-# customer_id) plus contacts linked to any of the customer's ship-to addresses
-# through contacts_x_ship_to.
+# Contacts for a customer, in P21 terms:
+#   1. oe_contacts_customer - the Customer Maintenance "Contacts" link table
+#      (this is what order entry offers on a sales order)
+#   2. contacts whose address record is the customer's corporate address
+#   3. contacts linked to one of the customer's ship-to addresses
+# Deleted customers, contacts, links and ship-tos are all excluded.
 CONTACTS_SQL = """
 SELECT DISTINCT
     ct.id                                   AS contact_id,
@@ -41,7 +44,12 @@ SELECT DISTINCT
 FROM {db}.dbo.contacts ct WITH (NOLOCK)
 WHERE ct.delete_flag = 'N'
   AND (
-        ct.address_id = ?
+        ct.id IN (
+            SELECT l.contact_id
+            FROM {db}.dbo.oe_contacts_customer l WITH (NOLOCK)
+            WHERE l.customer_id = ? AND l.delete_flag = 'N'
+        )
+     OR ct.address_id = ?
      OR ct.id IN (
             SELECT cxs.contact_id
             FROM {db}.dbo.contacts_x_ship_to cxs WITH (NOLOCK)
@@ -49,7 +57,7 @@ WHERE ct.delete_flag = 'N'
                OR cxs.ship_to_id IN (
                     SELECT s.ship_to_id
                     FROM {db}.dbo.ship_to s WITH (NOLOCK)
-                    WHERE s.customer_id = ?
+                    WHERE s.customer_id = ? AND s.delete_flag = 'N'
                )
         )
   )
@@ -107,7 +115,7 @@ def _contacts_sync(customer_id: str) -> list[dict[str, Any]]:
     cid = _parse_id(customer_id)
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(CONTACTS_SQL.format(db=get_settings().p21_database), [cid, cid, cid])
+        cur.execute(CONTACTS_SQL.format(db=get_settings().p21_database), [cid, cid, cid, cid])
         rows = _rows(cur)
     return rows
 

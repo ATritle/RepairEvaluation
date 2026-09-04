@@ -51,9 +51,11 @@ The Customer field is a type-ahead against P21. Customers and contacts are
 always shown as `# - name` (P21 id, dash, name). Picking a customer:
 
 - stores the P21 `customer_id` with the report and shows a `P21 #id` tag
-- turns Customer Contact into a drop-down of **that customer's contacts only**
-  (contacts on the customer's corporate address plus contacts linked to any of
-  its ship-to addresses via `contacts_x_ship_to`)
+- turns Customer Contact into a drop-down of **that customer's contacts only**:
+  the Customer Maintenance contact links (`oe_contacts_customer`, the same list
+  order entry offers), plus contacts on the customer's corporate address and
+  contacts linked to its ship-to addresses. Deleted customers, contacts, links
+  and ship-tos are excluded.
 - fills Customer Email from the chosen contact and greys it out. An
   **Override** check box to the right of the label un-greys the field so a
   different address can be typed. Un-checking it asks "Are you sure?" and, on
