@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image as PILImage
 from PIL import ImageOps
 
-from .config import PHOTOS_DIR
+from .config import PHOTOS_DIR, THUMBS_DIR
 
 MAX_EDGE = 2000
 JPEG_QUALITY = 82
@@ -58,3 +58,25 @@ def cache_photo(filename: str, content: bytes) -> Path:
     tmp.write_bytes(content)
     tmp.replace(p)
     return p
+
+
+THUMB_EDGE = 360
+
+
+def thumb_path(filename: str) -> Path:
+    return THUMBS_DIR / Path(filename).name
+
+
+def make_thumbnail(filename: str) -> Path:
+    """Build (or reuse) a small JPEG for library grids from the cached full image."""
+    THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+    out = thumb_path(filename)
+    if out.exists():
+        return out
+    with PILImage.open(photo_path(filename)) as im:
+        im = im.convert("RGB")
+        im.thumbnail((THUMB_EDGE, THUMB_EDGE), PILImage.Resampling.LANCZOS)
+        tmp = out.with_suffix(".part")
+        im.save(tmp, format="JPEG", quality=78, optimize=True)
+        tmp.replace(out)
+    return out

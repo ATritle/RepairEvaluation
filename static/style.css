@@ -109,6 +109,33 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .inline input[type="number"] { width: 78px; }
 .muted { color: var(--muted); }
 
+/* ---------- Photo library ---------- */
+.photo-toolbar .btn-row .btn { flex: none; }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+.count-badge {
+  display: inline-block; min-width: 18px; padding: 1px 6px; margin-left: 4px;
+  background: var(--orange); color: #fff; border-radius: 10px; font-size: 11px; font-weight: bold; text-align: center;
+}
+.count-badge[hidden] { display: none; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.lib-grid figure {
+  margin: 0; position: relative; aspect-ratio: 4 / 3; border-radius: 8px; overflow: hidden;
+  background: #111; border: 2px solid #444; cursor: pointer;
+}
+.lib-grid figure.selected { border-color: var(--orange); box-shadow: 0 0 0 2px rgba(255,122,0,0.35); }
+.lib-grid figure.on-report { opacity: 0.55; cursor: default; }
+.lib-grid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-grid figcaption {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 6px; font-size: 11px;
+  background: rgba(0,0,0,0.65); color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lib-grid .flag { position: absolute; top: 6px; left: 6px; font-size: 11px; padding: 2px 7px; border-radius: 10px; color: #fff; background: var(--section); }
+.lib-grid .tick { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: var(--orange); color: #fff; font-size: 14px; display: none; align-items: center; justify-content: center; }
+.lib-grid figure.selected .tick { display: flex; }
+.lib-grid .rm { position: absolute; bottom: 28px; right: 6px; background: rgba(0,0,0,0.7); border: 0; color: #fff; border-radius: 50%; width: 24px; height: 24px; font-size: 12px; cursor: pointer; display: none; }
+.lib-grid figure:hover .rm { display: block; }
+.modal-foot .spacer { flex: 1; }
+
 /* ---------- Revision banner ---------- */
 .rev-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

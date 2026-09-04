@@ -436,6 +436,8 @@
   async function uploadPhotos(files) {
     if (!files.length) return;
     const fd = new FormData();
+    const rn = $("#f-repair_no").value.trim();
+    if (rn) fd.append("repair_no", rn);   // also files the photos in this repair's library
     for (const f of files) fd.append("files", f, f.name);
     setStatus(`Uploading ${files.length} photo${files.length === 1 ? "" : "s"}…`);
     try {
@@ -447,6 +449,7 @@
       renderPhotos();
       markDirty();
       setStatus(`Added ${uploaded.length} photo${uploaded.length === 1 ? "" : "s"}`);
+      refreshLibraryCount();
     } catch (err) {
       toast(`Upload failed: ${err.message}`, true);
       setStatus("");
@@ -507,6 +510,7 @@
     renderPhotos();
     clearDirty();
     updateRevisionBanner();
+    refreshLibraryCount();
   }
 
   function newReport(force = false) {
@@ -765,6 +769,119 @@
     }
   }
   $("#btn-history").addEventListener("click", openHistory);
+
+  // --------------------------------------------------------- photo library
+  let libraryItems = [];
+  const librarySelected = new Set();
+
+  function currentRepairNo() {
+    return $("#f-repair_no").value.trim();
+  }
+
+  async function refreshLibraryCount() {
+    const rn = currentRepairNo();
+    const badge = $("#library-count");
+    $("#mobile-link").href = rn ? `/mobile?r=${encodeURIComponent(rn)}` : "/mobile";
+    if (!rn) { badge.hidden = true; return; }
+    try {
+      const items = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();
+      const onReport = new Set(state.photos.map((p) => p.file));
+      const fresh = items.filter((i) => !onReport.has(i.file)).length;
+      badge.textContent = fresh ? `${fresh} new` : String(items.length);
+      badge.hidden = items.length === 0;
+    } catch (_) {
+      badge.hidden = true;
+    }
+  }
+
+  function renderLibrary() {
+    const grid = $("#library-grid");
+    grid.innerHTML = "";
+    const onReport = new Set(state.photos.map((p) => p.file));
+    for (const it of libraryItems) {
+      const used = onReport.has(it.file);
+      const fig = document.createElement("figure");
+      fig.classList.toggle("on-report", used);
+      fig.classList.toggle("selected", librarySelected.has(it.file));
+      fig.innerHTML =
+        `<img src="/photos/${encodeURIComponent(it.file)}?thumb=1" alt="" loading="lazy">` +
+        (used ? `<span class="flag">on report</span>` : (it.source === "mobile" ? `<span class="flag">📱 phone</span>` : "")) +
+        `<span class="tick">✓</span>` +
+        `<button class="rm" title="Remove from library">✕</button>` +
+        `<figcaption>${esc(fmtWhen(it.uploaded_at))}${it.uploaded_by ? " · " + esc(it.uploaded_by) : ""}${it.name ? " · " + esc(it.name) : ""}</figcaption>`;
+      if (!used) {
+        fig.addEventListener("click", (e) => {
+          if (e.target.classList.contains("rm")) return;
+          if (librarySelected.has(it.file)) librarySelected.delete(it.file); else librarySelected.add(it.file);
+          renderLibrary();
+        });
+      }
+      $(".rm", fig).addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const ok = await confirmDialog("Remove from library?",
+          used ? "This photo is on the current report. It will be removed from the library only; the report keeps it."
+               : "Remove this photo from the repair's library? Saved revisions that already use it are not affected.");
+        if (!ok) return;
+        try {
+          await api(`/api/repairs/${encodeURIComponent(currentRepairNo())}/photos/${encodeURIComponent(it.file)}`, { method: "DELETE" });
+          librarySelected.delete(it.file);
+          await loadLibrary();
+        } catch (err) { toast(`Remove failed: ${err.message}`, true); }
+      });
+      grid.appendChild(fig);
+    }
+    $("#library-empty").hidden = libraryItems.length > 0;
+    $("#library-selected").textContent = `${librarySelected.size} selected`;
+    $("#library-add").disabled = librarySelected.size === 0;
+  }
+
+  async function loadLibrary() {
+    const rn = currentRepairNo();
+    $("#library-title").textContent = `Photo Library — ${rn}`;
+    try {
+      libraryItems = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();
+      const fromPhone = libraryItems.filter((i) => i.source === "mobile").length;
+      $("#library-sub").textContent = `${libraryItems.length} photo${libraryItems.length === 1 ? "" : "s"}` +
+        (fromPhone ? ` · ${fromPhone} from phone` : "") + ` · click to select, then add to the report`;
+    } catch (err) {
+      libraryItems = [];
+      $("#library-sub").textContent = `Unable to load library: ${err.message}`;
+    }
+    for (const f of Array.from(librarySelected)) if (!libraryItems.some((i) => i.file === f)) librarySelected.delete(f);
+    renderLibrary();
+    refreshLibraryCount();
+  }
+
+  async function openLibrary() {
+    if (!currentRepairNo()) { toast("Enter a Repair # first — the library is per repair number", true); $("#f-repair_no").focus(); return; }
+    librarySelected.clear();
+    openModal("#modal-library");
+    await loadLibrary();
+  }
+
+  function addSelectedFromLibrary() {
+    const onReport = new Set(state.photos.map((p) => p.file));
+    let added = 0;
+    for (const it of libraryItems) {
+      if (!librarySelected.has(it.file) || onReport.has(it.file)) continue;
+      state.photos.push({ file: it.file, name: it.name || it.file, description: it.caption || "", rotation: 0, annotations: [] });
+      added++;
+    }
+    librarySelected.clear();
+    if (added) { renderPhotos(); markDirty(); toast(`Added ${added} photo${added === 1 ? "" : "s"} to the report`); }
+    closeModal($("#modal-library"));
+    refreshLibraryCount();
+  }
+
+  $("#btn-library").addEventListener("click", openLibrary);
+  $("#library-refresh").addEventListener("click", loadLibrary);
+  $("#library-add").addEventListener("click", addSelectedFromLibrary);
+  $("#library-select-new").addEventListener("click", () => {
+    const onReport = new Set(state.photos.map((p) => p.file));
+    for (const it of libraryItems) if (!onReport.has(it.file)) librarySelected.add(it.file);
+    renderLibrary();
+  });
+  repairInput.addEventListener("change", refreshLibraryCount);
 
   async function checkStorage() {
     try {

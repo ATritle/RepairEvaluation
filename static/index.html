@@ -116,7 +116,13 @@
 
   <div class="section">PHOTOGRAPHIC DOCUMENTATION</div>
   <div class="photo-toolbar">
-    <button class="btn primary" id="btn-add-photo">+ ADD PHOTO</button>
+    <div class="btn-row">
+      <button class="btn primary" id="btn-add-photo">+ ADD PHOTO</button>
+      <button class="btn" id="btn-library" title="Photos uploaded for this repair number (from the phone page or here)">
+        📚 Photo Library <span class="count-badge" id="library-count" hidden></span>
+      </button>
+      <a class="btn" id="mobile-link" href="/mobile" target="_blank" title="Open the phone capture page for this repair number">📱 Phone Upload</a>
+    </div>
     <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.bmp,.webp" multiple hidden>
     <span class="muted" id="photo-count">0 photos</span>
   </div>
@@ -178,6 +184,32 @@
         <tbody id="report-list"></tbody>
       </table>
       <div class="muted" id="report-empty" hidden>No saved evaluations yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Photo library -->
+<div class="modal" id="modal-library" hidden>
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <div>
+        <h2 id="library-title">Photo Library</h2>
+        <div class="muted" id="library-sub"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="library-refresh">Refresh</button>
+        <button class="btn small" data-close>✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="lib-grid" id="library-grid"></div>
+      <div class="muted" id="library-empty" hidden>No photos in the library for this repair number yet. Use <b>Phone Upload</b> or <b>+ ADD PHOTO</b>.</div>
+    </div>
+    <div class="modal-foot">
+      <span class="muted" id="library-selected">0 selected</span>
+      <span class="spacer"></span>
+      <button class="btn" id="library-select-new">Select all not on report</button>
+      <button class="btn primary" id="library-add">Add selected to report</button>
     </div>
   </div>
 </div>

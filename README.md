@@ -111,6 +111,29 @@ rotation), `photo_annotation` (symbol, x, y, size per markup), `photo_file`
 once the app sits behind authentication (the `X-Forwarded-User` header is
 honoured if a proxy supplies it).
 
+### Photo library and phone capture (`/mobile`)
+
+Every photo is filed in a **library keyed on the repair number**
+(`RepairEval.repair_photo`), independent of evaluations and revisions.
+
+- **`/mobile`** is a phone-sized page: enter the repair number (or open
+  `/mobile?r=R123456`, e.g. from a QR code), then **Take Photo** or **Choose
+  Photos**. Uploads go straight into that repair's library and the page shows
+  what is already there. Recent repair numbers are one tap away.
+- In the evaluation form, **📚 Photo Library** opens a grid of everything in
+  the library for the current Repair #, with a badge showing how many are not
+  yet on the report. Click to select, **Add selected to report**. Photos
+  already on the report are marked. **📱 Phone Upload** opens `/mobile`
+  pre-filled with the current repair number.
+- Photos added with **+ ADD PHOTO** are also filed in the library when the
+  form has a Repair #.
+- Removing a photo from the library is a soft delete; saved revisions that use
+  it are untouched. Thumbnails are generated on demand (`/photos/<file>?thumb=1`).
+
+Endpoints: `POST /api/mobile/photos` (form: `repair_no`, `files[]`),
+`GET /api/repairs/{repair_no}/photos`, `DELETE /api/repairs/{repair_no}/photos/{file}`,
+`GET /api/repairs/recent`.
+
 ### Input hardening
 
 All SQL is parameterised (pyodbc `?` placeholders); table names come from
@@ -134,6 +157,7 @@ app/
   pdf_builder.py  ReportLab PDF (ported from main.py)
 static/
   index.html, style.css, app.js   the browser UI
+  mobile.html, mobile.js          phone capture page (/mobile)
 assets/           logos (shared with the desktop app)
 main.py           original desktop app (PyQt6)
 ```
@@ -149,7 +173,10 @@ main.py           original desktop app (PyQt6)
 | POST | `/api/evaluations` | save = append a revision (body = report JSON) |
 | DELETE | `/api/evaluations/{repair_no}` | delete an evaluation and all revisions |
 | GET | `/api/storage/status` | Forge connectivity check |
-| POST | `/api/photos` | upload one or more images (multipart `files`) |
+| POST | `/api/photos` | upload images (multipart `files`, optional `repair_no` to file in the library) |
+| POST | `/api/mobile/photos` | phone upload: `repair_no` + `files[]` into the library |
+| GET | `/api/repairs/{repair_no}/photos` | photo library for a repair number |
+| DELETE | `/api/repairs/{repair_no}/photos/{file}` | remove a photo from the library (soft) |
 | POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
 | GET | `/api/evaluations/{repair_no}/pdf?revision=n` | build a PDF from a saved revision |
 | GET | `/api/p21/status` | P21 connectivity check |

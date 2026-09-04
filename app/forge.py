@@ -365,6 +365,87 @@ def _photo_put_sync(file_name: str, original_name: str, content: bytes, width: i
         cn.commit()
 
 
+# --------------------------------------------------------------------------
+# Photo library (per repair number, independent of revisions)
+# --------------------------------------------------------------------------
+def _library_add_sync(repair_no: str, file_name: str, original_name: Optional[str], source: str,
+                      uploaded_by: Optional[str]) -> None:
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(
+            f"""MERGE {_s()}.repair_photo AS t
+                USING (SELECT ? AS repair_no, ? AS file_name) AS s
+                   ON t.repair_no = s.repair_no AND t.file_name = s.file_name
+                WHEN MATCHED THEN UPDATE SET removed_at = NULL
+                WHEN NOT MATCHED THEN
+                    INSERT (repair_no, file_name, original_name, source, uploaded_by)
+                    VALUES (s.repair_no, s.file_name, ?, ?, ?);""",
+            [repair_no, file_name, original_name[:260] if original_name else None, source, uploaded_by],
+        )
+        cn.commit()
+
+
+def _library_list_sync(repair_no: str) -> list[dict[str, Any]]:
+    s = _s()
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(
+            f"""SELECT rp.file_name, rp.original_name, rp.caption, rp.source, rp.uploaded_at, rp.uploaded_by,
+                       pf.width_px, pf.height_px, pf.byte_size,
+                       (SELECT COUNT(*) FROM {s}.revision_photo vp WITH (NOLOCK)
+                          JOIN {s}.revision r WITH (NOLOCK) ON r.revision_id = vp.revision_id
+                          JOIN {s}.evaluation e WITH (NOLOCK) ON e.evaluation_id = r.evaluation_id
+                         WHERE vp.file_name = rp.file_name AND e.repair_no = rp.repair_no
+                           AND r.revision_no = e.current_revision_no) AS in_latest
+                FROM {s}.repair_photo rp WITH (NOLOCK)
+                JOIN {s}.photo_file pf WITH (NOLOCK) ON pf.file_name = rp.file_name
+                WHERE rp.repair_no = ? AND rp.removed_at IS NULL
+                ORDER BY rp.uploaded_at DESC, rp.repair_photo_id DESC""",
+            [repair_no],
+        )
+        return [
+            {
+                "file": d["file_name"],
+                "name": d.get("original_name") or "",
+                "caption": d.get("caption") or "",
+                "source": d.get("source") or "web",
+                "uploaded_at": _iso(d.get("uploaded_at")),
+                "uploaded_by": d.get("uploaded_by"),
+                "width": d.get("width_px"),
+                "height": d.get("height_px"),
+                "bytes": int(d.get("byte_size") or 0),
+                "in_latest": bool(d.get("in_latest")),
+            }
+            for d in _rows(cur)
+        ]
+
+
+def _library_remove_sync(repair_no: str, file_name: str) -> bool:
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(
+            f"UPDATE {_s()}.repair_photo SET removed_at = SYSDATETIME() WHERE repair_no = ? AND file_name = ? AND removed_at IS NULL",
+            [repair_no, file_name],
+        )
+        n = cur.rowcount
+        cn.commit()
+    return n > 0
+
+
+def _library_recent_repairs_sync(limit: int) -> list[dict[str, Any]]:
+    """Repair numbers that received photos recently (for the mobile page)."""
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(
+            f"""SELECT TOP (?) repair_no, COUNT(*) AS photos, MAX(uploaded_at) AS last_upload
+                FROM {_s()}.repair_photo WITH (NOLOCK)
+                WHERE removed_at IS NULL
+                GROUP BY repair_no ORDER BY MAX(uploaded_at) DESC""",
+            [limit],
+        )
+        return [{"repair_no": d["repair_no"], "photos": int(d["photos"]), "last_upload": _iso(d["last_upload"])} for d in _rows(cur)]
+
+
 def _ping_sync() -> dict[str, Any]:
     with _connect() as cn:
         cur = cn.cursor()
@@ -413,6 +494,23 @@ async def photo_get(file_name: str) -> Optional[bytes]:
 async def photo_put(file_name: str, original_name: str, content: bytes, width: int, height: int,
                     uploaded_by: Optional[str]) -> None:
     await asyncio.to_thread(_photo_put_sync, file_name, original_name, content, width, height, uploaded_by)
+
+
+async def library_add(repair_no: str, file_name: str, original_name: Optional[str], source: str,
+                      uploaded_by: Optional[str]) -> None:
+    await asyncio.to_thread(_library_add_sync, repair_no, file_name, original_name, source, uploaded_by)
+
+
+async def library_list(repair_no: str) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_library_list_sync, repair_no)
+
+
+async def library_remove(repair_no: str, file_name: str) -> bool:
+    return await asyncio.to_thread(_library_remove_sync, repair_no, file_name)
+
+
+async def library_recent_repairs(limit: int = 20) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_library_recent_repairs_sync, limit)
 
 
 async def ping() -> dict[str, Any]:

@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 STATIC = ROOT / "static"
 DATA = ROOT / "data"
-PHOTOS_DIR = DATA / "photos"
+PHOTOS_DIR = DATA / "photos"   # local cache of Forge photo bytes
+THUMBS_DIR = DATA / "thumbs"   # generated thumbnails for the library grid
 REPORTS_DIR = DATA / "reports"  # legacy JSON store (pre-Forge); no longer written
 
 APP_LOGO = ASSETS / "ifp_logo_app.png"
@@ -38,4 +39,4 @@ ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 def ensure_dirs() -> None:
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    THUMBS_DIR.mkdir(parents=True, exist_ok=True)

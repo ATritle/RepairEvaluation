@@ -6,13 +6,14 @@ or:   python -m app.main
 Storage: Forge.RepairEval (see sql/001_repaireval_schema.sql). Photo bytes live
 in Forge too; data/photos is only a local cache.
 """
+import asyncio
 import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -27,7 +28,7 @@ from .config import (
     TECHNICIANS,
     ensure_dirs,
 )
-from .images import cache_photo, optimize_uploaded_bytes, photo_path
+from .images import cache_photo, make_thumbnail, optimize_uploaded_bytes, photo_path
 from .pdf_builder import build_pdf
 from .schemas import PHOTO_FILE_RE, Report, ReportSummary, RevisionSummary, UploadedPhoto, clean_text
 
@@ -70,6 +71,12 @@ def _forge_error(exc: Exception) -> HTTPException:
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/mobile", include_in_schema=False)
+async def mobile_page() -> FileResponse:
+    """Phone-friendly capture page: repair number + camera, straight into the library."""
+    return FileResponse(STATIC / "mobile.html")
 
 
 @app.get("/api/config")
@@ -157,10 +164,11 @@ async def api_delete_evaluation(repair_no: str) -> JSONResponse:
 # --------------------------------------------------------------------------
 # Photos (bytes in Forge, cached on local disk)
 # --------------------------------------------------------------------------
-@app.post("/api/photos", response_model=list[UploadedPhoto])
-async def api_upload_photos(request: Request, files: list[UploadFile] = File(...)) -> list[UploadedPhoto]:
+async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no: Optional[str],
+                         source: str) -> list[UploadedPhoto]:
+    """Normalise each upload, store it in Forge and, when a repair number is
+    given, register it in that repair's photo library."""
     uploaded: list[UploadedPhoto] = []
-    who = _who(request)
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
         if ext not in ALLOWED_IMAGE_EXT:
@@ -170,13 +178,70 @@ async def api_upload_photos(request: Request, files: list[UploadFile] = File(...
             name, jpeg, w, h = optimize_uploaded_bytes(raw)
         except Exception as exc:  # corrupt / unreadable image
             raise HTTPException(status_code=400, detail=f"Unable to read {f.filename}: {exc}") from exc
+        display = clean_text(Path(f.filename or name).name, 260) or name
         try:
-            await forge.photo_put(name, f.filename or "", jpeg, w, h, who)
+            await forge.photo_put(name, display, jpeg, w, h, who)
+            if repair_no:
+                await forge.library_add(repair_no, name, display, source, who)
         except Exception as exc:
             raise _forge_error(exc) from exc
         cache_photo(name, jpeg)
-        uploaded.append(UploadedPhoto(file=name, name=clean_text(Path(f.filename or name).name, 260) or name))
+        uploaded.append(UploadedPhoto(file=name, name=display))
     return uploaded
+
+
+@app.post("/api/photos", response_model=list[UploadedPhoto])
+async def api_upload_photos(
+    request: Request, files: list[UploadFile] = File(...), repair_no: str = Form("")
+) -> list[UploadedPhoto]:
+    """Desktop upload. If the form already has a Repair #, the photos also land in its library."""
+    rn = _check_repair_no(repair_no) if repair_no.strip() else None
+    return await _store_uploads(files, _who(request), rn, "web")
+
+
+# --------------------------------------------------------------------------
+# Photo library per repair number (+ mobile capture)
+# --------------------------------------------------------------------------
+@app.post("/api/mobile/photos", response_model=list[UploadedPhoto])
+async def api_mobile_upload(
+    request: Request, repair_no: str = Form(...), files: list[UploadFile] = File(...)
+) -> list[UploadedPhoto]:
+    """Phone capture: repair number + one or more photos -> library."""
+    rn = _check_repair_no(repair_no)
+    return await _store_uploads(files, _who(request), rn, "mobile")
+
+
+@app.get("/api/repairs/{repair_no}/photos")
+async def api_library_list(repair_no: str) -> list[dict]:
+    rn = _check_repair_no(repair_no)
+    try:
+        return await forge.library_list(rn)
+    except Exception as exc:
+        raise _forge_error(exc) from exc
+
+
+@app.delete("/api/repairs/{repair_no}/photos/{file_name}")
+async def api_library_remove(repair_no: str, file_name: str) -> JSONResponse:
+    """Remove a photo from the repair's library (soft delete). Revisions that use it are untouched."""
+    rn = _check_repair_no(repair_no)
+    if not PHOTO_FILE_RE.fullmatch(file_name.lower()):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    try:
+        if not await forge.library_remove(rn, file_name.lower()):
+            raise HTTPException(status_code=404, detail="Photo not in library")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _forge_error(exc) from exc
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/repairs/recent")
+async def api_recent_repairs(limit: int = Query(20, ge=1, le=100)) -> list[dict]:
+    try:
+        return await forge.library_recent_repairs(limit)
+    except Exception as exc:
+        raise _forge_error(exc) from exc
 
 
 async def _ensure_cached(file_name: str) -> Optional[Path]:
@@ -190,7 +255,8 @@ async def _ensure_cached(file_name: str) -> Optional[Path]:
 
 
 @app.get("/photos/{file_name}", include_in_schema=False)
-async def api_photo(file_name: str) -> FileResponse:
+async def api_photo(file_name: str, thumb: bool = False) -> FileResponse:
+    """Serve a stored photo (or a small thumbnail with ?thumb=1) from the local cache."""
     if not PHOTO_FILE_RE.fullmatch(file_name.lower()):
         raise HTTPException(status_code=404, detail="Photo not found")
     try:
@@ -199,6 +265,11 @@ async def api_photo(file_name: str) -> FileResponse:
         raise _forge_error(exc) from exc
     if p is None:
         raise HTTPException(status_code=404, detail="Photo not found")
+    if thumb:
+        try:
+            p = await asyncio.to_thread(make_thumbnail, file_name)
+        except Exception:
+            pass  # fall back to the full image
     return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
