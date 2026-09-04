@@ -749,7 +749,8 @@
   const contactInput = $("#f-customer_contact");
   const contactSelect = $("#f-contact_select");
   const emailInput = $("#f-customer_email");
-  const overrideBtn = $("#email-override");
+  const overrideBox = $("#email-override");
+  const overrideWrap = $("#email-override-wrap");
   let suggestTimer = null;
   let suggestions = [];
   let activeSuggestion = -1;
@@ -799,7 +800,7 @@
     items.forEach((c, i) => {
       const li = document.createElement("li");
       const loc = [c.city, c.state].filter(Boolean).join(", ");
-      li.innerHTML = `<span>${esc(c.customer_name)}</span><span class="sub">#${esc(c.customer_id)}${loc ? " · " + esc(loc) : ""}</span>`;
+      li.innerHTML = `<span>${esc(customerLabel(c))}</span><span class="sub">${esc(loc)}</span>`;
       li.addEventListener("mousedown", (e) => { e.preventDefault(); selectCustomer(c); });
       li.addEventListener("mousemove", () => setActiveSuggestion(i));
       custList.appendChild(li);
@@ -826,6 +827,10 @@
     }
   }
 
+  // Customers and contacts are always shown as "# - name".
+  function customerLabel(c) { return `${c.customer_id} - ${c.customer_name}`; }
+  function contactLabel(c) { return `${c.contact_id} - ${c.contact_name}`; }
+
   function setCustomerLink(id) {
     state.customerId = id;
     custTag.textContent = id ? `P21 #${id}` : "";
@@ -845,17 +850,10 @@
 
   function updateOverrideUi() {
     const linked = !!state.contactId;
-    overrideBtn.hidden = !linked;
-    if (!linked) { lockEmail(false); return; }
-    if (state.emailOverride) {
-      overrideBtn.textContent = "Use P21 email";
-      overrideBtn.title = "Discard the manual address and go back to the contact's P21 email";
-      lockEmail(false);
-    } else {
-      overrideBtn.textContent = "Override";
-      overrideBtn.title = "Enter a different email address for this report";
-      lockEmail(true);
-    }
+    overrideWrap.hidden = !linked;
+    if (!linked) { overrideBox.checked = false; lockEmail(false); return; }
+    overrideBox.checked = state.emailOverride;
+    lockEmail(!state.emailOverride);
   }
 
   function contactEmail(id) {
@@ -872,8 +870,7 @@
     for (const c of state.contacts) {
       const o = document.createElement("option");
       o.value = String(c.contact_id);
-      const extra = [c.title, c.email_address].filter(Boolean).join(" · ");
-      o.textContent = c.contact_name + (extra ? `  (${extra})` : "");
+      o.textContent = contactLabel(c);
       contactSelect.appendChild(o);
     }
     contactSelect.value = selectedId && state.contacts.some((c) => String(c.contact_id) === String(selectedId)) ? String(selectedId) : "";
@@ -902,7 +899,7 @@
 
   async function selectCustomer(c) {
     hideSuggestions();
-    custInput.value = c.customer_name;
+    custInput.value = customerLabel(c);
     setCustomerLink(c.customer_id);
     state.contactId = null;
     state.emailOverride = false;
@@ -926,26 +923,60 @@
     const id = contactSelect.value;
     const c = state.contacts.find((x) => String(x.contact_id) === id);
     state.contactId = c ? String(c.contact_id) : null;
-    contactInput.value = c ? c.contact_name : "";
+    contactInput.value = c ? contactLabel(c) : "";
     if (c && !state.emailOverride) emailInput.value = c.email_address || "";
     if (!c) { state.emailOverride = false; emailInput.value = ""; }
     updateOverrideUi();
     markDirty();
   }
 
-  overrideBtn.addEventListener("click", () => {
+  overrideBox.addEventListener("change", async () => {
     if (!state.contactId) return;
-    state.emailOverride = !state.emailOverride;
-    if (state.emailOverride) {
+    if (overrideBox.checked) {
+      state.emailOverride = true;
       updateOverrideUi();
       emailInput.focus();
       emailInput.select();
-    } else {
-      emailInput.value = contactEmail(state.contactId);
-      updateOverrideUi();
+      markDirty();
+      return;
     }
+    // Unchecking discards the manual address - ask first.
+    const ok = await confirmDialog(
+      "Turn off email override?",
+      `The address you entered will be replaced with the P21 email for this contact` +
+      (contactEmail(state.contactId) ? ` (${contactEmail(state.contactId)}).` : ". P21 has no email on file for this contact."),
+    );
+    if (!ok) { overrideBox.checked = true; return; }
+    state.emailOverride = false;
+    emailInput.value = contactEmail(state.contactId);
+    updateOverrideUi();
     markDirty();
   });
+
+  /** Promise-based Yes/No dialog styled like the rest of the app. */
+  function confirmDialog(title, text) {
+    return new Promise((resolve) => {
+      const m = $("#modal-confirm");
+      $("#confirm-title").textContent = title;
+      $("#confirm-text").textContent = text;
+      const yes = $("#confirm-yes"), no = $("#confirm-no");
+      const done = (v) => {
+        m.hidden = true;
+        yes.removeEventListener("click", onYes);
+        no.removeEventListener("click", onNo);
+        m.removeEventListener("click", onBackdrop);
+        resolve(v);
+      };
+      const onYes = () => done(true);
+      const onNo = () => done(false);
+      const onBackdrop = (e) => { if (e.target === m) done(false); };
+      yes.addEventListener("click", onYes);
+      no.addEventListener("click", onNo);
+      m.addEventListener("click", onBackdrop);
+      m.hidden = false;
+      no.focus();
+    });
+  }
 
   contactSelect.addEventListener("change", onContactChosen);
   custClear.addEventListener("click", () => { clearCustomerLink({ keepText: false }); markDirty(); custInput.focus(); });

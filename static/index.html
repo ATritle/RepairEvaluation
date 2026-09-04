@@ -69,8 +69,10 @@
         <select id="f-contact_select" hidden></select>
       </label>
       <div class="field">
-        <span>Customer Email
-          <button type="button" class="link-btn" id="email-override" hidden>Override</button>
+        <span class="label-row">Customer Email
+          <label class="override-check" id="email-override-wrap" hidden title="Check to enter a different email address for this report">
+            <input type="checkbox" id="email-override"> Override
+          </label>
         </span>
         <input type="email" id="f-customer_email">
       </div>
@@ -289,6 +291,20 @@
         <p>Repair evaluation and photographic documentation tool</p>
         <p id="about-version">Web Version</p>
       </section>
+    </div>
+  </div>
+</div>
+
+<!-- Generic confirm dialog -->
+<div class="modal" id="modal-confirm" hidden>
+  <div class="modal-box narrow">
+    <div class="modal-head">
+      <h2 id="confirm-title">Are you sure?</h2>
+    </div>
+    <div class="modal-body" id="confirm-text"></div>
+    <div class="modal-foot confirm-foot">
+      <button class="btn" id="confirm-no">No</button>
+      <button class="btn primary" id="confirm-yes">Yes</button>
     </div>
   </div>
 </div>

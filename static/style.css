@@ -132,11 +132,15 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .suggestions li:hover .sub, .suggestions li.active .sub { color: #fff; }
 .suggestions li.info { color: var(--muted); cursor: default; }
 .suggestions li.info:hover { background: transparent; color: var(--muted); }
-.link-btn {
-  background: transparent; border: 0; color: var(--orange); cursor: pointer;
-  font-size: 12px; padding: 0 6px; text-decoration: underline;
+.label-row { display: flex; align-items: center; justify-content: space-between; }
+.override-check {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--orange); cursor: pointer; user-select: none;
 }
-.link-btn:hover { color: var(--orange-hover); }
+.override-check[hidden] { display: none; }
+.override-check input { accent-color: var(--orange); width: 14px; height: 14px; margin: 0; cursor: pointer; }
+.modal-box.narrow { width: min(460px, 100%); }
+.confirm-foot { justify-content: flex-end; }
 input.locked { background: #262626; color: var(--muted); cursor: not-allowed; }
 #p21-badge { font-size: 11px; }
 #p21-badge.off { color: #e0a04b; }

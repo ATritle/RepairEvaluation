@@ -47,15 +47,17 @@ app, so reports look the same.
 
 ### Prophet 21 integration (customer / contact / email)
 
-The Customer field is a type-ahead against P21. Picking a customer:
+The Customer field is a type-ahead against P21. Customers and contacts are
+always shown as `# - name` (P21 id, dash, name). Picking a customer:
 
 - stores the P21 `customer_id` with the report and shows a `P21 #id` tag
 - turns Customer Contact into a drop-down of **that customer's contacts only**
   (contacts on the customer's corporate address plus contacts linked to any of
   its ship-to addresses via `contacts_x_ship_to`)
-- fills Customer Email from the chosen contact and locks it. An **Override**
-  link unlocks the field for a one-off address; **Use P21 email** puts the
-  P21 address back. The override flag is saved with the report.
+- fills Customer Email from the chosen contact and greys it out. An
+  **Override** check box to the right of the label un-greys the field so a
+  different address can be typed. Un-checking it asks "Are you sure?" and, on
+  Yes, puts the P21 email back. The override flag is saved with the report.
 
 Typing in the Customer box after a pick breaks the link and the fields go
 back to free text. If P21 is unreachable or no credentials are configured the
@@ -65,7 +67,7 @@ Connection settings live in `.env` (copy `.env.example`):
 
 ```
 P21_SERVER=sql19
-P21_DATABASE=P21
+P21_DATABASE=Prophet21
 P21_USER=<read-only login>
 P21_PASSWORD=<password>
 P21_DRIVER=ODBC Driver 17 for SQL Server

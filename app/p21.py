@@ -14,11 +14,11 @@ CUSTOMER_SEARCH_SQL = """
 SELECT TOP (?)
     c.customer_id,
     c.customer_name,
-    a.city,
-    a.state,
+    a.mail_city  AS city,
+    a.mail_state AS state,
     c.company_id
-FROM P21.dbo.customer c WITH (NOLOCK)
-LEFT JOIN P21.dbo.address a WITH (NOLOCK) ON a.id = c.customer_id
+FROM {db}.dbo.customer c WITH (NOLOCK)
+LEFT JOIN {db}.dbo.address a WITH (NOLOCK) ON a.id = c.customer_id
 WHERE c.delete_flag = 'N'
   AND (c.customer_name LIKE ? OR CAST(c.customer_id AS VARCHAR(20)) LIKE ?)
   {company_filter}
@@ -38,17 +38,17 @@ SELECT DISTINCT
     ct.direct_phone,
     ct.cellular,
     ct.title
-FROM P21.dbo.contacts ct WITH (NOLOCK)
+FROM {db}.dbo.contacts ct WITH (NOLOCK)
 WHERE ct.delete_flag = 'N'
   AND (
         ct.address_id = ?
      OR ct.id IN (
-            SELECT cxs.id
-            FROM P21.dbo.contacts_x_ship_to cxs WITH (NOLOCK)
+            SELECT cxs.contact_id
+            FROM {db}.dbo.contacts_x_ship_to cxs WITH (NOLOCK)
             WHERE cxs.ship_to_id = ?
                OR cxs.ship_to_id IN (
                     SELECT s.ship_to_id
-                    FROM P21.dbo.ship_to s WITH (NOLOCK)
+                    FROM {db}.dbo.ship_to s WITH (NOLOCK)
                     WHERE s.customer_id = ?
                )
         )
@@ -89,7 +89,7 @@ def _search_customers_sync(query: str, limit: int) -> list[dict[str, Any]]:
     like = f"%{query}%"
     prefix = f"{query}%"
     company_filter = "AND c.company_id = ?" if s.p21_company_id else ""
-    sql = CUSTOMER_SEARCH_SQL.format(company_filter=company_filter)
+    sql = CUSTOMER_SEARCH_SQL.format(db=s.p21_database, company_filter=company_filter)
     params: list[Any] = [limit, like, like]
     if s.p21_company_id:
         params.append(s.p21_company_id)
@@ -107,7 +107,7 @@ def _contacts_sync(customer_id: str) -> list[dict[str, Any]]:
     cid = _parse_id(customer_id)
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(CONTACTS_SQL, [cid, cid, cid])
+        cur.execute(CONTACTS_SQL.format(db=get_settings().p21_database), [cid, cid, cid])
         rows = _rows(cur)
     return rows
 

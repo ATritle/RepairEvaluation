@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     p21_server: str = "sql19"
-    p21_database: str = "P21"
+    p21_database: str = "Prophet21"
     p21_user: str = ""
     p21_password: str = ""
     p21_driver: str = "ODBC Driver 17 for SQL Server"
