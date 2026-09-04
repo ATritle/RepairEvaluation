@@ -342,25 +342,34 @@ def _photo_exists_sync(file_name: str) -> bool:
         return cur.fetchone() is not None
 
 
-def _photo_get_sync(file_name: str) -> Optional[bytes]:
+def _photo_locate_sync(file_name: str) -> Optional[dict[str, Any]]:
+    """Where a photo's bytes are: {'storage': 'db'|'fs', 'path': ..., 'content': bytes|None}."""
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(f"SELECT content FROM {_s()}.photo_file WITH (NOLOCK) WHERE file_name = ?", [file_name])
+        cur.execute(
+            f"SELECT storage, path, content FROM {_s()}.photo_file WITH (NOLOCK) WHERE file_name = ?", [file_name]
+        )
         row = cur.fetchone()
-        return bytes(row[0]) if row else None
+        if row is None:
+            return None
+        storage, path, content = row
+        return {"storage": (storage or "db").strip(), "path": path, "content": bytes(content) if content is not None else None}
 
 
-def _photo_put_sync(file_name: str, original_name: str, content: bytes, width: int, height: int,
-                    uploaded_by: Optional[str]) -> None:
-    digest = hashlib.sha256(content).hexdigest()
+def _photo_put_sync(file_name: str, original_name: str, content: Optional[bytes], width: int, height: int,
+                    uploaded_by: Optional[str], storage: str, path: Optional[str], byte_size: int,
+                    sha_source: bytes) -> None:
+    digest = hashlib.sha256(sha_source).hexdigest()
     with _connect() as cn:
         cur = cn.cursor()
         cur.execute(
             f"""INSERT INTO {_s()}.photo_file
-                (file_name, original_name, content_type, width_px, height_px, byte_size, sha256, content, uploaded_by)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                (file_name, original_name, content_type, width_px, height_px, byte_size, sha256, content,
+                 uploaded_by, storage, path)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             [file_name, original_name[:260] if original_name else None, "image/jpeg", width, height,
-             len(content), digest, pyodbc.Binary(content), uploaded_by],
+             byte_size, digest, pyodbc.Binary(content) if content is not None else None, uploaded_by,
+             storage, path],
         )
         cn.commit()
 
@@ -487,13 +496,15 @@ async def photo_exists(file_name: str) -> bool:
     return await asyncio.to_thread(_photo_exists_sync, file_name)
 
 
-async def photo_get(file_name: str) -> Optional[bytes]:
-    return await asyncio.to_thread(_photo_get_sync, file_name)
+async def photo_locate(file_name: str) -> Optional[dict[str, Any]]:
+    return await asyncio.to_thread(_photo_locate_sync, file_name)
 
 
-async def photo_put(file_name: str, original_name: str, content: bytes, width: int, height: int,
-                    uploaded_by: Optional[str]) -> None:
-    await asyncio.to_thread(_photo_put_sync, file_name, original_name, content, width, height, uploaded_by)
+async def photo_put(file_name: str, original_name: str, content: Optional[bytes], width: int, height: int,
+                    uploaded_by: Optional[str], *, storage: str, path: Optional[str], byte_size: int,
+                    sha_source: bytes) -> None:
+    await asyncio.to_thread(_photo_put_sync, file_name, original_name, content, width, height, uploaded_by,
+                            storage, path, byte_size, sha_source)
 
 
 async def library_add(repair_no: str, file_name: str, original_name: Optional[str], source: str,

@@ -80,6 +80,9 @@ FORGE_DATABASE=Forge
 FORGE_SCHEMA=RepairEval
 FORGE_USER=<login with read/write on Forge.RepairEval>
 FORGE_PASSWORD=<password>
+
+PHOTO_STORE=fs                    # fs = files under PHOTO_FS_ROOT, db = VARBINARY in Forge
+PHOTO_FS_ROOT=data/photo_store    # local folder now; \\server\share\RepairEval later
 ```
 
 All P21 queries are SELECT-only with `WITH (NOLOCK)`, run through a read-only
@@ -99,8 +102,12 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
   above the form shows which revision is loaded; **History** lists all
   revisions and lets you view any of them. Saving while viewing an old
   revision creates a new latest revision from that version.
-- Photo bytes are stored in Forge too (`RepairEval.photo_file`, shared across
-  revisions by file name). `data/photos/` is only a local cache.
+- Photo **metadata** is always in Forge (`RepairEval.photo_file`, shared across
+  revisions by file name). Photo **bytes** go where `PHOTO_STORE` says:
+  `fs` (default) writes files under `PHOTO_FS_ROOT/<yyyy>/<mm>/<file>.jpg`, a
+  local folder for now and a UNC share later with no code change; `db` keeps
+  them as VARBINARY in the same row. Each row records which, so both can
+  coexist. `data/photos/` is only a local cache used by the PDF builder.
 
 Tables: `evaluation` (repair number, current revision), `revision` (all form
 fields + saved_at / saved_by), `revision_photo` (order, description,
@@ -152,6 +159,7 @@ app/
   config.py       paths, technician list, symbol list
   schemas.py      Pydantic models (Report, Photo, Annotation)
   forge.py        Forge (RepairEval schema) storage
+  photo_store.py  where photo bytes live (fs folder / db), per-row
   settings.py     .env settings (P21 + Forge)
   images.py       photo normalisation
   pdf_builder.py  ReportLab PDF (ported from main.py)

@@ -17,7 +17,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import forge, p21
+from . import forge, p21, photo_store
 from .config import (
     ALLOWED_IMAGE_EXT,
     APP_NAME,
@@ -28,9 +28,10 @@ from .config import (
     TECHNICIANS,
     ensure_dirs,
 )
-from .images import cache_photo, make_thumbnail, optimize_uploaded_bytes, photo_path
+from .images import make_thumbnail, optimize_uploaded_bytes
 from .pdf_builder import build_pdf
 from .schemas import PHOTO_FILE_RE, Report, ReportSummary, RevisionSummary, UploadedPhoto, clean_text
+from .settings import get_settings
 
 ensure_dirs()
 
@@ -92,7 +93,9 @@ async def get_config() -> dict:
 @app.get("/api/storage/status")
 async def api_storage_status() -> dict:
     try:
-        return {"available": True, **(await forge.ping())}
+        st = get_settings()
+        return {"available": True, **(await forge.ping()),
+                "photo_store": st.photo_store, "photo_root": str(photo_store.fs_root()) if st.photo_store == "fs" else None}
     except forge.ForgeUnavailable as exc:
         return {"available": False, "reason": str(exc)}
     except Exception as exc:  # schema missing etc.
@@ -138,7 +141,7 @@ async def api_save_evaluation(report: Report, request: Request) -> Report:
     report.repair_no = _check_repair_no(report.repair_no)
     try:
         for photo in report.photos:
-            if not photo_path(photo.file).exists() and not await forge.photo_exists(photo.file):
+            if not await photo_store.exists(photo.file):
                 raise HTTPException(status_code=400, detail=f"Photo missing on server: {photo.file}")
         saved = await forge.save_evaluation(report.model_dump(), _who(request))
         return Report(**saved)
@@ -180,12 +183,11 @@ async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no:
             raise HTTPException(status_code=400, detail=f"Unable to read {f.filename}: {exc}") from exc
         display = clean_text(Path(f.filename or name).name, 260) or name
         try:
-            await forge.photo_put(name, display, jpeg, w, h, who)
+            await photo_store.put(name, display, jpeg, w, h, who)
             if repair_no:
                 await forge.library_add(repair_no, name, display, source, who)
         except Exception as exc:
             raise _forge_error(exc) from exc
-        cache_photo(name, jpeg)
         uploaded.append(UploadedPhoto(file=name, name=display))
     return uploaded
 
@@ -245,13 +247,7 @@ async def api_recent_repairs(limit: int = Query(20, ge=1, le=100)) -> list[dict]
 
 
 async def _ensure_cached(file_name: str) -> Optional[Path]:
-    p = photo_path(file_name)
-    if p.exists():
-        return p
-    content = await forge.photo_get(Path(file_name).name)
-    if content is None:
-        return None
-    return cache_photo(file_name, content)
+    return await photo_store.ensure_cached(Path(file_name).name)
 
 
 @app.get("/photos/{file_name}", include_in_schema=False)

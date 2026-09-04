@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     forge_driver: str = "ODBC Driver 17 for SQL Server"
     forge_timeout: int = 10
 
+    # Photo bytes: "fs" = files under photo_fs_root (local folder now, UNC share
+    # later), "db" = VARBINARY in Forge.RepairEval.photo_file. Metadata is always in Forge.
+    photo_store: str = "fs"
+    photo_fs_root: str = "data/photo_store"
+
     @property
     def forge_configured(self) -> bool:
         return bool(self.forge_user and self.forge_password)
