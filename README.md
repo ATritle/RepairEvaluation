@@ -118,6 +118,20 @@ rotation), `photo_annotation` (symbol, x, y, size per markup), `photo_file`
 once the app sits behind authentication (the `X-Forwarded-User` header is
 honoured if a proxy supplies it).
 
+### Links
+
+The address bar follows what is loaded, so a link can be copied at any time:
+
+```
+/r/R123456        the evaluation, latest revision
+/r/R123456/v2     revision 2 (read as it was; saving creates a new latest)
+/mobile?r=R123456 phone capture page pre-filled
+```
+
+Opening either `/r/...` form loads that evaluation directly. The same shape
+works on the API: `/api/evaluations/R123456/latest`, `/api/evaluations/R123456/v2`,
+and `.../pdf` on either for the report.
+
 ### Photo library and phone capture (`/mobile`)
 
 Every photo is filed in a **library keyed on the repair number**
@@ -175,7 +189,9 @@ assets/           logos
 | --- | --- | --- |
 | GET | `/api/config` | technicians + symbols |
 | GET | `/api/evaluations?q=` | list / search evaluations (latest revision each) |
-| GET | `/api/evaluations/{repair_no}?revision=n` | load latest (or a specific) revision |
+| GET | `/api/evaluations/{repair_no}` | latest revision (`?revision=n` still accepted) |
+| GET | `/api/evaluations/{repair_no}/latest` | latest revision, explicit |
+| GET | `/api/evaluations/{repair_no}/v{n}` | revision n |
 | GET | `/api/evaluations/{repair_no}/revisions` | revision history |
 | POST | `/api/evaluations` | save = append a revision (body = report JSON) |
 | DELETE | `/api/evaluations/{repair_no}` | delete an evaluation and all revisions |
@@ -185,7 +201,8 @@ assets/           logos
 | GET | `/api/repairs/{repair_no}/photos` | photo library for a repair number |
 | DELETE | `/api/repairs/{repair_no}/photos/{file}` | remove a photo from the library (soft) |
 | POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
-| GET | `/api/evaluations/{repair_no}/pdf?revision=n` | build a PDF from a saved revision |
+| GET | `/api/evaluations/{repair_no}/pdf` or `/latest/pdf` | PDF of the latest revision (`?download=1` for attachment) |
+| GET | `/api/evaluations/{repair_no}/v{n}/pdf` | PDF of revision n |
 | GET | `/api/p21/status` | P21 connectivity check |
 | GET | `/api/p21/customers?q=` | P21 customer type-ahead |
 | GET | `/api/p21/customers/{id}/contacts` | contacts for one P21 customer |

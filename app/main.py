@@ -74,6 +74,15 @@ async def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/r/{repair_no}", include_in_schema=False)
+@app.get("/r/{repair_no}/latest", include_in_schema=False)
+@app.get("/r/{repair_no}/v{revision:int}", include_in_schema=False)
+async def deep_link(repair_no: str, revision: Optional[int] = None) -> FileResponse:
+    """Deep links into the form: /r/R123456 (latest), /r/R123456/v2. The page
+    reads the path and loads that evaluation; the URL follows as you save."""
+    return FileResponse(STATIC / "index.html")
+
+
 @app.get("/mobile", include_in_schema=False)
 async def mobile_page() -> FileResponse:
     """Phone-friendly capture page: repair number + camera, straight into the library."""
@@ -117,12 +126,30 @@ async def api_list_evaluations(
         raise _forge_error(exc) from exc
 
 
-@app.get("/api/evaluations/{repair_no}", response_model=Report)
-async def api_get_evaluation(repair_no: str, revision: Optional[int] = Query(None, ge=1)) -> Report:
+async def _load(repair_no: str, revision: Optional[int]) -> Report:
     try:
         return Report(**(await forge.load_evaluation(repair_no, revision)))
     except Exception as exc:
         raise _forge_error(exc) from exc
+
+
+@app.get("/api/evaluations/{repair_no}", response_model=Report)
+async def api_get_evaluation(repair_no: str, revision: Optional[int] = Query(None, ge=1)) -> Report:
+    """Latest revision by default; ?revision=n still accepted for compatibility."""
+    return await _load(repair_no, revision)
+
+
+@app.get("/api/evaluations/{repair_no}/latest", response_model=Report)
+async def api_get_latest(repair_no: str) -> Report:
+    return await _load(repair_no, None)
+
+
+@app.get("/api/evaluations/{repair_no}/v{revision}", response_model=Report)
+async def api_get_revision(repair_no: str, revision: int) -> Report:
+    """A specific revision: /api/evaluations/R123456/v2"""
+    if revision < 1:
+        raise HTTPException(status_code=404, detail="Revision numbers start at 1")
+    return await _load(repair_no, revision)
 
 
 @app.get("/api/evaluations/{repair_no}/revisions", response_model=list[RevisionSummary])
@@ -303,14 +330,20 @@ async def api_pdf(report: Report, download: bool = False) -> Response:
 
 
 @app.get("/api/evaluations/{repair_no}/pdf")
+@app.get("/api/evaluations/{repair_no}/latest/pdf")
 async def api_evaluation_pdf(
     repair_no: str, revision: Optional[int] = Query(None, ge=1), download: bool = False
 ) -> Response:
-    try:
-        report = Report(**(await forge.load_evaluation(repair_no, revision)))
-    except Exception as exc:
-        raise _forge_error(exc) from exc
-    return await _pdf_response(report, download)
+    """PDF of the latest revision (or ?revision=n). Add ?download=1 for an attachment."""
+    return await _pdf_response(await _load(repair_no, revision), download)
+
+
+@app.get("/api/evaluations/{repair_no}/v{revision}/pdf")
+async def api_revision_pdf(repair_no: str, revision: int, download: bool = False) -> Response:
+    """PDF of one revision: /api/evaluations/R123456/v2/pdf"""
+    if revision < 1:
+        raise HTTPException(status_code=404, detail="Revision numbers start at 1")
+    return await _pdf_response(await _load(repair_no, revision), download)
 
 
 # --------------------------------------------------------------------------

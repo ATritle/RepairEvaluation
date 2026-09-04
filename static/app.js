@@ -510,6 +510,7 @@
     clearDirty();
     updateRevisionBanner();
     refreshLibraryCount();
+    syncUrl();
   }
 
   function newReport(force = false) {
@@ -546,6 +547,7 @@
       state.savedBy = saved.saved_by;
       clearDirty();
       updateRevisionBanner();
+      syncUrl();
       setStatus(`Saved ${saved.repair_no} revision ${saved.revision_no} at ${new Date().toLocaleTimeString()}`);
       toast(`Saved ${saved.repair_no} as revision ${saved.revision_no}`);
     } catch (err) {
@@ -626,11 +628,30 @@
       .every((f) => !$(`#f-${f}`).value.trim());
   }
 
+  // ------------------------------------------------------------ URL sync
+  // /r/R123456      -> latest revision      /r/R123456/v2 -> revision 2
+  // The address bar follows whatever is loaded, so a link can be copied at any time.
+  function syncUrl() {
+    let path = "/";
+    if (state.repairNo) {
+      path = `/r/${encodeURIComponent(state.repairNo)}`;
+      if (state.revisionNo && state.currentRevisionNo && state.revisionNo < state.currentRevisionNo) path += `/v${state.revisionNo}`;
+    }
+    if (location.pathname !== path) history.replaceState(null, "", path);
+  }
+
+  function parseUrl() {
+    const m = location.pathname.match(/^\/r\/([^/]+)(?:\/(latest|v(\d+)))?\/?$/i);
+    if (!m) return null;
+    return { repairNo: decodeURIComponent(m[1]), revision: m[3] ? Number(m[3]) : null };
+  }
+
+  /** Load an evaluation (latest revision, or a specific one) into the form. */
   async function loadReport(repairNo, revision, modal) {
     if (state.dirty && !formIsBlank() &&
         !(await confirmDialog("Discard unsaved changes?", "This repair evaluation has unsaved changes. Open another anyway?"))) return;
     try {
-      const url = `/api/evaluations/${encodeURIComponent(repairNo)}` + (revision ? `?revision=${revision}` : "");
+      const url = `/api/evaluations/${encodeURIComponent(repairNo)}/` + (revision ? `v${revision}` : "latest");
       const data = await (await api(url)).json();
       loadData(data);
       if (modal) closeModal(modal);
@@ -1384,8 +1405,10 @@
     }
     fillSymbolSelect($("#zoom-symbol"));
     if (cfg.version) $("#about-version").textContent = `Version ${cfg.version}`;
+    const link = parseUrl();          // read before the blank form resets the address bar
     await Promise.all([checkP21(), checkStorage()]);
     newReport(true);
+    if (link) await loadReport(link.repairNo, link.revision, null);
   }
 
   init();
