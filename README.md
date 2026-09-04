@@ -125,7 +125,7 @@ The address bar follows what is loaded, so a link can be copied at any time:
 ```
 /r/R123456        the evaluation, latest revision
 /r/R123456/v2     revision 2 (read as it was; saving creates a new latest)
-/mobile?r=R123456 phone capture page pre-filled
+/mobile/R123456   phone capture page pre-filled (follows the Repair # field)
 ```
 
 Opening either `/r/...` form loads that evaluation directly. The same shape
@@ -138,8 +138,8 @@ Every photo is filed in a **library keyed on the repair number**
 (`RepairEval.repair_photo`), independent of evaluations and revisions.
 
 - **`/mobile`** is a phone-sized page: enter the repair number (or open
-  `/mobile?r=R123456`, e.g. from a QR code), then **Take Photo** or **Choose
-  Photos**. Uploads go straight into that repair's library and the page shows
+  `/mobile/R123456`, e.g. from a QR code; the address bar follows the field),
+  then **Take Photo** or **Choose Photos**. Uploads go straight into that repair's library and the page shows
   what is already there. Recent repair numbers are one tap away.
 - In the evaluation form, **📚 Photo Library** opens a grid of everything in
   the library for the current Repair #, with a badge showing how many are not

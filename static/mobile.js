@@ -1,6 +1,7 @@
 /* /mobile - phone capture page. Enter a repair number, take or choose photos,
  * they upload straight into that repair's photo library (Forge.RepairEval.repair_photo).
- * Open with ?r=R123456 to pre-fill (handy for a QR code on the job ticket). */
+ * /mobile/R123456 opens pre-filled (QR code on the job ticket); the address bar
+ * follows the Repair # field so the link can be shared. ?r= is still accepted. */
 (() => {
   "use strict";
   const $ = (s) => document.querySelector(s);
@@ -19,10 +20,16 @@
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function fmt(iso) { return iso ? new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : ""; }
 
+  function syncUrl() {
+    const path = REPAIR_RE.test(current) ? `/mobile/${encodeURIComponent(current)}` : "/mobile";
+    if (location.pathname + location.search !== path) history.replaceState(null, "", path);
+  }
+
   function setRepair(v) {
     current = (v || "").trim().toUpperCase();
     const ok = REPAIR_RE.test(current);
     camBtn.disabled = galBtn.disabled = !ok;
+    syncUrl();
     if (!current) { status.textContent = "Enter the repair number first."; grid.innerHTML = ""; empty.hidden = true; return; }
     if (!ok) { status.textContent = "Letters, digits, space, . _ / - only."; return; }
     try { localStorage.setItem("ifp_mobile_repair", current); } catch (_) { /* ignore */ }
@@ -107,9 +114,9 @@
     } catch (_) { /* ignore */ }
   }
 
-  // Init: ?r= wins, then last used number.
-  const fromUrl = new URLSearchParams(location.search).get("r");
-  let initial = fromUrl || "";
+  // Init: /mobile/R123456 wins, then ?r=, then the last used number.
+  const pathMatch = location.pathname.match(/^\/mobile\/([^/]+)\/?$/i);
+  let initial = pathMatch ? decodeURIComponent(pathMatch[1]) : (new URLSearchParams(location.search).get("r") || "");
   if (!initial) { try { initial = localStorage.getItem("ifp_mobile_repair") || ""; } catch (_) { /* ignore */ } }
   repair.value = initial;
   setRepair(initial);

@@ -801,7 +801,7 @@
   async function refreshLibraryCount() {
     const rn = currentRepairNo();
     const badge = $("#library-count");
-    $("#mobile-link").href = rn ? `/mobile?r=${encodeURIComponent(rn)}` : "/mobile";
+    $("#mobile-link").href = rn ? `/mobile/${encodeURIComponent(rn)}` : "/mobile";
     if (!rn) { badge.hidden = true; return; }
     try {
       const items = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();

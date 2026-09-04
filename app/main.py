@@ -84,8 +84,10 @@ async def deep_link(repair_no: str, revision: Optional[int] = None) -> FileRespo
 
 
 @app.get("/mobile", include_in_schema=False)
-async def mobile_page() -> FileResponse:
-    """Phone-friendly capture page: repair number + camera, straight into the library."""
+@app.get("/mobile/{repair_no}", include_in_schema=False)
+async def mobile_page(repair_no: Optional[str] = None) -> FileResponse:
+    """Phone-friendly capture page: repair number + camera, straight into the
+    library. /mobile/R123456 opens pre-filled; the address follows the field."""
     return FileResponse(STATIC / "mobile.html")
 
 
