@@ -23,6 +23,7 @@ from .config import (
     APP_NAME,
     APP_VERSION,
     ASSETS,
+    COLORS,
     STATIC,
     SYMBOLS,
     TECHNICIANS,
@@ -98,6 +99,7 @@ async def get_config() -> dict:
         "version": APP_VERSION,
         "technicians": TECHNICIANS,
         "symbols": SYMBOLS,
+        "colors": COLORS,
     }
 
 

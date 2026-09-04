@@ -68,26 +68,27 @@ def _draw_pdf_annotations(im, annotations, display_width_px, display_height_px) 
         x = a.get("x", 0.5) * w
         y = a.get("y", 0.5) * h
         symbol_scale = max(0.25, a.get("size", 100) / 100.0)
+        color = a.get("color") or "#ff0000"
 
         current_size = max(4.0, base_source_symbol * symbol_scale)
         width = max(2, int(current_size * 0.065))
         radius = current_size / 2
 
         if symbol == "circle":
-            draw.ellipse([x - radius, y - radius, x + radius, y + radius], outline="red", width=width)
+            draw.ellipse([x - radius, y - radius, x + radius, y + radius], outline=color, width=width)
         elif symbol == "square":
-            draw.rectangle([x - radius, y - radius, x + radius, y + radius], outline="red", width=width)
+            draw.rectangle([x - radius, y - radius, x + radius, y + radius], outline=color, width=width)
         elif symbol == "rectangle":
             rw, rh = current_size * 1.55, current_size * 0.85
-            draw.rectangle([x - rw / 2, y - rh / 2, x + rw / 2, y + rh / 2], outline="red", width=width)
+            draw.rectangle([x - rw / 2, y - rh / 2, x + rw / 2, y + rh / 2], outline=color, width=width)
         elif symbol == "x":
             s = current_size * 0.55
-            draw.line([x - s, y - s, x + s, y + s], fill="red", width=width)
-            draw.line([x + s, y - s, x - s, y + s], fill="red", width=width)
+            draw.line([x - s, y - s, x + s, y + s], fill=color, width=width)
+            draw.line([x + s, y - s, x - s, y + s], fill=color, width=width)
         elif symbol == "check":
             s = current_size * 0.55
-            draw.line([x - s, y, x - s * 0.2, y + s * 0.7], fill="red", width=width)
-            draw.line([x - s * 0.2, y + s * 0.7, x + s, y - s * 0.75], fill="red", width=width)
+            draw.line([x - s, y, x - s * 0.2, y + s * 0.7], fill=color, width=width)
+            draw.line([x - s * 0.2, y + s * 0.7, x + s, y - s * 0.75], fill=color, width=width)
         else:
             length = current_size * 1.35
             head = current_size * 0.32
@@ -100,12 +101,12 @@ def _draw_pdf_annotations(im, annotations, display_width_px, display_height_px) 
             else:
                 sx, sy, ex, ey = x + length / 2, y, x - length / 2, y
 
-            draw.line([sx, sy, ex, ey], fill="red", width=width)
+            draw.line([sx, sy, ex, ey], fill=color, width=width)
             angle = math.atan2(ey - sy, ex - sx)
             left = (ex - head * math.cos(angle - math.pi / 6), ey - head * math.sin(angle - math.pi / 6))
             right = (ex - head * math.cos(angle + math.pi / 6), ey - head * math.sin(angle + math.pi / 6))
-            draw.line([ex, ey, left[0], left[1]], fill="red", width=width)
-            draw.line([ex, ey, right[0], right[1]], fill="red", width=width)
+            draw.line([ex, ey, left[0], left[1]], fill=color, width=width)
+            draw.line([ex, ey, right[0], right[1]], fill=color, width=width)
 
 
 def _pdf_image_path(photo: dict, temp_dir: str) -> Path:

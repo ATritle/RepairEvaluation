@@ -99,18 +99,50 @@
     }
   }
 
+  const DEFAULT_COLOR = "#ff0000";
+  function fillColorSelect(select, value = DEFAULT_COLOR) {
+    select.innerHTML = "";
+    for (const c of cfg.colors) {
+      const o = document.createElement("option");
+      o.value = c.value;
+      o.textContent = "■ " + c.label;
+      o.style.color = c.value;
+      select.appendChild(o);
+    }
+    select.value = value;
+    paintColorSelect(select);
+    select.addEventListener("change", () => paintColorSelect(select));
+  }
+  function paintColorSelect(select) {
+    select.style.color = select.value;
+    select.style.background = (select.value === "#000000") ? "#555" : "";
+  }
+
   // ---------------------------------------------------------- symbol drawing
   // Must stay in step with _draw_pdf_annotations() in app/pdf_builder.py so the
   // on-screen preview and the PDF agree on geometry.
-  function drawSymbol(ctx, symbol, x, y, base, symbolSize = 100, selected = false) {
+  function drawSymbol(ctx, symbol, x, y, base, symbolSize = 100, selected = false, color = DEFAULT_COLOR) {
     const size = Math.max(18, Math.min(70, base * 0.10)) * Math.max(0.25, symbolSize / 100);
-    const lineWidth = Math.max(2, size * 0.065) + (selected ? 1.5 : 0);
+    const lineWidth = Math.max(2, size * 0.065);
     ctx.save();
-    ctx.strokeStyle = selected ? "#ffff00" : "#ff0000";
-    ctx.lineWidth = lineWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
+    tracePath(ctx, symbol, x, y, size);
+    if (selected) {
+      // Selection halo: a wide translucent stroke under the symbol, in a
+      // contrasting tone so it reads on any colour.
+      ctx.strokeStyle = (color === "#ffffff" || color === "#ffd400") ? "rgba(0,0,0,0.6)" : "rgba(255,255,255,0.8)";
+      ctx.lineWidth = lineWidth + 6;
+      ctx.stroke();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function tracePath(ctx, symbol, x, y, size) {
 
     if (symbol === "circle") {
       ctx.arc(x, y, size / 2, 0, Math.PI * 2);
@@ -142,8 +174,6 @@
       ctx.moveTo(ex, ey);
       ctx.lineTo(ex - head * Math.cos(angle + Math.PI / 6), ey - head * Math.sin(angle + Math.PI / 6));
     }
-    ctx.stroke();
-    ctx.restore();
   }
 
   // ------------------------------------------------------------ PhotoCanvas
@@ -168,6 +198,7 @@
       this.onChange = onChange;
       this.symbol = "arrow_up";
       this.symbolSize = 250;
+      this.color = DEFAULT_COLOR;
       this.selected = null;
       this.dragging = false;
       this.img = null;
@@ -238,6 +269,7 @@
         x: Math.max(0, Math.min(1, (p.x - r.x) / Math.max(1, r.w))),
         y: Math.max(0, Math.min(1, (p.y - r.y) / Math.max(1, r.h))),
         size: this.symbolSize,
+        color: this.color,
       });
       this.selected = this.photo.annotations.length - 1;
       this.onChange();
@@ -322,7 +354,7 @@
 
       const base = Math.min(sw, sh);
       this.photo.annotations.forEach((a, i) => {
-        drawSymbol(ctx, a.symbol, x + (a.x ?? 0.5) * sw, y + (a.y ?? 0.5) * sh, base, a.size ?? 100, i === this.selected);
+        drawSymbol(ctx, a.symbol, x + (a.x ?? 0.5) * sw, y + (a.y ?? 0.5) * sh, base, a.size ?? 100, i === this.selected, a.color || DEFAULT_COLOR);
       });
     }
   }
@@ -342,11 +374,14 @@
       this.symbolSelect = $(".symbol-select", this.el);
       fillSymbolSelect(this.symbolSelect);
       this.sizeInput = $(".size-input", this.el);
+      this.colorSelect = $(".color-select", this.el);
+      fillColorSelect(this.colorSelect);
 
       this.canvas = new PhotoCanvas($(".photo-canvas", this.el), photo, () => this.markupChanged());
 
       this.symbolSelect.addEventListener("change", () => { this.canvas.symbol = this.symbolSelect.value; });
       this.sizeInput.addEventListener("input", () => this.sizeChanged());
+      this.colorSelect.addEventListener("change", () => this.colorChanged());
 
       const desc = $(".description", this.el);
       desc.value = photo.description || "";
@@ -381,9 +416,18 @@
       this.markupChanged();
     }
 
+    colorChanged() {
+      const v = this.colorSelect.value;
+      this.canvas.color = v;
+      const a = this.photo.annotations[this.canvas.selected];
+      if (a) a.color = v;
+      this.markupChanged();
+    }
+
     markupChanged() {
       const a = this.photo.annotations[this.canvas.selected];
       if (a && Number(this.sizeInput.value) !== a.size) this.sizeInput.value = a.size;
+      if (a && this.colorSelect.value !== (a.color || DEFAULT_COLOR)) { this.colorSelect.value = a.color || DEFAULT_COLOR; paintColorSelect(this.colorSelect); }
       markDirty();
       this.canvas.draw();
     }
@@ -475,6 +519,7 @@
         x: a.x ?? 0.5,
         y: a.y ?? 0.5,
         size: a.size ?? 100,
+        color: a.color || DEFAULT_COLOR,
       })),
     }));
     return data;
@@ -503,7 +548,7 @@
       description: p.description || "",
       rotation: p.rotation || 0,
       annotations: (p.annotations || []).map((a) => ({
-        symbol: a.symbol || "arrow_up", x: a.x ?? 0.5, y: a.y ?? 0.5, size: a.size ?? 100,
+        symbol: a.symbol || "arrow_up", x: a.x ?? 0.5, y: a.y ?? 0.5, size: a.size ?? 100, color: a.color || DEFAULT_COLOR,
       })),
     }));
     renderPhotos();
@@ -932,12 +977,15 @@
     zoomCanvas = new PhotoCanvas(fresh, card.photo, () => {
       const a = card.photo.annotations[zoomCanvas.selected];
       if (a && Number($("#zoom-size").value) !== a.size) $("#zoom-size").value = a.size;
+      if (a && $("#zoom-color").value !== (a.color || DEFAULT_COLOR)) { $("#zoom-color").value = a.color || DEFAULT_COLOR; paintColorSelect($("#zoom-color")); }
       markDirty();
     });
     zoomCanvas.symbol = card.symbolSelect.value;
     zoomCanvas.symbolSize = clampSize(card.sizeInput.value);
+    zoomCanvas.color = card.colorSelect.value;
     $("#zoom-symbol").value = zoomCanvas.symbol;
     $("#zoom-size").value = zoomCanvas.symbolSize;
+    $("#zoom-color").value = zoomCanvas.color; paintColorSelect($("#zoom-color"));
 
     $("#zoom-range").value = 100;
     applyZoom();
@@ -963,6 +1011,8 @@
     if (zoomCard) {
       zoomCard.symbolSelect.value = $("#zoom-symbol").value;
       zoomCard.canvas.symbol = $("#zoom-symbol").value;
+      zoomCard.colorSelect.value = $("#zoom-color").value; paintColorSelect(zoomCard.colorSelect);
+      zoomCard.canvas.color = $("#zoom-color").value;
       zoomCard.sizeInput.value = clampSize($("#zoom-size").value);
       zoomCard.canvas.symbolSize = clampSize($("#zoom-size").value);
       zoomCard.canvas.selected = null;
@@ -974,6 +1024,13 @@
   $("#zoom-range").addEventListener("input", applyZoom);
   $("#zoom-reset").addEventListener("click", () => { $("#zoom-range").value = 100; applyZoom(); });
   $("#zoom-symbol").addEventListener("change", () => { if (zoomCanvas) zoomCanvas.symbol = $("#zoom-symbol").value; });
+  $("#zoom-color").addEventListener("change", () => {
+    if (!zoomCanvas) return;
+    zoomCanvas.color = $("#zoom-color").value;
+    const a = zoomCanvas.photo.annotations[zoomCanvas.selected];
+    if (a) { a.color = zoomCanvas.color; markDirty(); }
+    zoomCanvas.draw();
+  });
   $("#zoom-size").addEventListener("input", () => {
     if (!zoomCanvas) return;
     const v = clampSize($("#zoom-size").value);
@@ -1404,6 +1461,7 @@
       tech.appendChild(o);
     }
     fillSymbolSelect($("#zoom-symbol"));
+    fillColorSelect($("#zoom-color"));
     if (cfg.version) $("#about-version").textContent = `Version ${cfg.version}`;
     const link = parseUrl();          // read before the blank form resets the address bar
     await Promise.all([checkP21(), checkStorage()]);

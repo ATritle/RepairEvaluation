@@ -34,7 +34,8 @@ Same workflow as the desktop app:
 - Rotate 90° left/right, reset rotation
 - Photo markup on an HTML canvas: arrows, circle, square, rectangle, X, check
   mark; click to place, click to select, drag to move, Delete to remove,
-  Size 25–300 % (default 250 %), Clear Markups
+  Size 25–300 % (default 250 %), Colour drop-down (10 colours, default red;
+  changing it recolours the selected symbol), Clear Markups
 - Open Photo / Zoom dialog with a 25–300 % zoom slider
 - Save / Open evaluations in Forge with full revision history (see below)
 - Preview PDF (in-page viewer) and Print / Save PDF (download)
@@ -111,7 +112,7 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
 
 Tables: `evaluation` (repair number, current revision), `revision` (all form
 fields + saved_at / saved_by), `revision_photo` (order, description,
-rotation), `photo_annotation` (symbol, x, y, size per markup), `photo_file`
+rotation), `photo_annotation` (symbol, x, y, size, colour per markup), `photo_file`
 (JPEG bytes).
 
 `saved_by` records the client address for now; switch it to the login name

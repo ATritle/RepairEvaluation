@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 PHOTO_FILE_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
+from .config import COLORS as _COLORS
+COLOR_VALUES = {c["value"] for c in _COLORS}
 SYMBOLS = {"arrow_up", "arrow_right", "arrow_down", "arrow_left", "circle", "square", "rectangle", "x", "check"}
 
 
@@ -49,6 +51,15 @@ class Annotation(BaseModel):
     x: float = Field(0.5, ge=0.0, le=1.0)
     y: float = Field(0.5, ge=0.0, le=1.0)
     size: int = Field(100, ge=25, le=300)
+    color: str = "#ff0000"
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in COLOR_VALUES:
+            raise ValueError(f"unknown colour {v!r}")
+        return v
 
     @field_validator("symbol")
     @classmethod

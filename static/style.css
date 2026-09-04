@@ -107,6 +107,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .inline { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .inline select { width: auto; }
 .inline input[type="number"] { width: 78px; }
+.color-select, #zoom-color { min-width: 110px; font-weight: bold; }
 .muted { color: var(--muted); }
 
 /* ---------- Photo library ---------- */

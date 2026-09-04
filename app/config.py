@@ -33,6 +33,20 @@ SYMBOLS = [
     {"label": "Check Mark", "value": "check"},
 ]
 
+# Markup colours offered in the Colour drop-down (hex, lower-case).
+COLORS = [
+    {"label": "Red", "value": "#ff0000"},
+    {"label": "Orange", "value": "#ff7a00"},
+    {"label": "Yellow", "value": "#ffd400"},
+    {"label": "Green", "value": "#00c800"},
+    {"label": "Blue", "value": "#0066ff"},
+    {"label": "Cyan", "value": "#00d5ff"},
+    {"label": "Magenta", "value": "#ff00c8"},
+    {"label": "Purple", "value": "#8a2be2"},
+    {"label": "White", "value": "#ffffff"},
+    {"label": "Black", "value": "#000000"},
+]
+
 ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 

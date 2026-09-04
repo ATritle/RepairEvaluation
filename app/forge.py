@@ -163,7 +163,7 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
             ids = [p["revision_photo_id"] for p in photos]
             marks = ",".join("?" * len(ids))
             cur.execute(
-                f"""SELECT revision_photo_id, symbol, x, y, size_pct
+                f"""SELECT revision_photo_id, symbol, x, y, size_pct, color
                     FROM {s}.photo_annotation WITH (NOLOCK)
                     WHERE revision_photo_id IN ({marks}) ORDER BY revision_photo_id, seq""",
                 ids,
@@ -171,7 +171,7 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
             by_photo: dict[int, list[dict[str, Any]]] = {}
             for a in _rows(cur):
                 by_photo.setdefault(a["revision_photo_id"], []).append(
-                    {"symbol": a["symbol"], "x": float(a["x"]), "y": float(a["y"]), "size": int(a["size_pct"])}
+                    {"symbol": a["symbol"], "x": float(a["x"]), "y": float(a["y"]), "size": int(a["size_pct"]), "color": (a.get("color") or "#ff0000").strip()}
                 )
         else:
             by_photo = {}
@@ -300,11 +300,11 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
                 anns = p.get("annotations") or []
                 if anns:
                     cur.executemany(
-                        f"""INSERT INTO {s}.photo_annotation (revision_photo_id, seq, symbol, x, y, size_pct)
-                            VALUES (?,?,?,?,?,?)""",
+                        f"""INSERT INTO {s}.photo_annotation (revision_photo_id, seq, symbol, x, y, size_pct, color)
+                            VALUES (?,?,?,?,?,?,?)""",
                         [
                             (photo_id, i, a.get("symbol") or "arrow_up", float(a.get("x", 0.5)),
-                             float(a.get("y", 0.5)), int(a.get("size", 100)))
+                             float(a.get("y", 0.5)), int(a.get("size", 100)), a.get("color") or "#ff0000")
                             for i, a in enumerate(anns, start=1)
                         ],
                     )

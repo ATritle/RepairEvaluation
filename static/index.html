@@ -142,6 +142,9 @@
         <input type="number" class="size-input" min="25" max="300" step="10" value="250"
                title="Set the size of the next symbol, or resize the selected symbol.">%
       </label>
+      <label class="inline">Colour:
+        <select class="color-select" title="Colour of the next symbol, or recolour the selected symbol."></select>
+      </label>
       <button class="btn small clear-markups">Clear Markups</button>
       <button class="btn small move-up" title="Move up">↑</button>
       <button class="btn small move-down" title="Move down">↓</button>
@@ -245,6 +248,7 @@
     <div class="modal-foot">
       <label class="inline">Add Symbol: <select id="zoom-symbol"></select></label>
       <label class="inline">Size: <input type="number" id="zoom-size" min="25" max="300" step="10" value="250">%</label>
+      <label class="inline">Colour: <select id="zoom-color"></select></label>
       <label class="inline zoom-slider">Zoom:
         <input type="range" id="zoom-range" min="25" max="300" value="100">
         <span id="zoom-label">100%</span>
