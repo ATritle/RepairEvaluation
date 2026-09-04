@@ -50,6 +50,11 @@ WHERE ct.delete_flag = 'N'
             WHERE l.customer_id = ? AND l.delete_flag = 'N'
         )
      OR ct.address_id = ?
+     OR ct.address_id IN (
+            SELECT s.ship_to_id
+            FROM {db}.dbo.ship_to s WITH (NOLOCK)
+            WHERE s.customer_id = ? AND s.delete_flag = 'N'
+        )
      OR ct.id IN (
             SELECT cxs.contact_id
             FROM {db}.dbo.contacts_x_ship_to cxs WITH (NOLOCK)
@@ -115,7 +120,7 @@ def _contacts_sync(customer_id: str) -> list[dict[str, Any]]:
     cid = _parse_id(customer_id)
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(CONTACTS_SQL.format(db=get_settings().p21_database), [cid, cid, cid, cid])
+        cur.execute(CONTACTS_SQL.format(db=get_settings().p21_database), [cid] * 5)
         rows = _rows(cur)
     return rows
 
