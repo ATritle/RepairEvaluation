@@ -114,12 +114,21 @@
     } catch (_) { /* ignore */ }
   }
 
-  // Init: /mobile/R123456 wins, then ?r=, then the last used number.
+  // Init: /mobile/R123456 or ?r= pre-fills. A bare /mobile starts empty; the
+  // last number used on this phone is offered as a tap target, not applied.
   const pathMatch = location.pathname.match(/^\/mobile\/([^/]+)\/?$/i);
-  let initial = pathMatch ? decodeURIComponent(pathMatch[1]) : (new URLSearchParams(location.search).get("r") || "");
-  if (!initial) { try { initial = localStorage.getItem("ifp_mobile_repair") || ""; } catch (_) { /* ignore */ } }
+  const initial = pathMatch ? decodeURIComponent(pathMatch[1]) : (new URLSearchParams(location.search).get("r") || "");
   repair.value = initial;
   setRepair(initial);
+  if (!initial) {
+    let last = "";
+    try { last = localStorage.getItem("ifp_mobile_repair") || ""; } catch (_) { /* ignore */ }
+    if (last) {
+      status.innerHTML = `Enter the repair number, or continue with <button type="button" class="link-btn" id="use-last">${esc(last)}</button>`;
+      $("#use-last").addEventListener("click", () => { repair.value = last; setRepair(last); });
+    }
+    repair.focus();
+  }
   loadRecent();
   setInterval(() => { if (REPAIR_RE.test(current)) loadLibrary(); }, 30000);
 })();
