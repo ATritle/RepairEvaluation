@@ -109,6 +109,38 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .inline input[type="number"] { width: 78px; }
 .muted { color: var(--muted); }
 
+/* ---------- P21 type-ahead ---------- */
+.typeahead { position: relative; }
+.input-with-tag { position: relative; display: flex; align-items: center; }
+.input-with-tag input { padding-right: 120px; }
+.input-with-tag .tag {
+  position: absolute; right: 38px; top: 50%; transform: translateY(-50%);
+  background: #35485a; color: var(--cyan); font-size: 12px;
+  padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+}
+.input-with-tag .ghost { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: transparent; border-color: transparent; }
+.suggestions {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 30;
+  margin: 2px 0 0; padding: 4px; list-style: none;
+  background: #242424; border: 1px solid #555; border-radius: 6px;
+  max-height: 320px; overflow: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.suggestions[hidden] { display: none; }
+.suggestions li { padding: 7px 10px; border-radius: 4px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
+.suggestions li .sub { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+.suggestions li:hover, .suggestions li.active { background: var(--orange); color: #fff; }
+.suggestions li:hover .sub, .suggestions li.active .sub { color: #fff; }
+.suggestions li.info { color: var(--muted); cursor: default; }
+.suggestions li.info:hover { background: transparent; color: var(--muted); }
+.link-btn {
+  background: transparent; border: 0; color: var(--orange); cursor: pointer;
+  font-size: 12px; padding: 0 6px; text-decoration: underline;
+}
+.link-btn:hover { color: var(--orange-hover); }
+input.locked { background: #262626; color: var(--muted); cursor: not-allowed; }
+#p21-badge { font-size: 11px; }
+#p21-badge.off { color: #e0a04b; }
+
 /* ---------- Photos ---------- */
 .photo-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .photo-area { display: flex; flex-direction: column; gap: 12px; }

@@ -53,19 +53,27 @@
       <input type="text" id="f-repair_no" placeholder="R123456">
     </label>
 
-    <label class="field">
-      <span>Customer</span>
-      <input type="text" id="f-customer">
-    </label>
+    <div class="field typeahead" id="customer-typeahead">
+      <span>Customer <small class="muted" id="p21-badge"></small></span>
+      <div class="input-with-tag">
+        <input type="text" id="f-customer" placeholder="Start typing a P21 customer name or ID…" autocomplete="off">
+        <span class="tag" id="customer-id-tag" hidden></span>
+        <button type="button" class="btn small ghost" id="customer-clear" title="Clear P21 customer" hidden>✕</button>
+      </div>
+      <ul class="suggestions" id="customer-suggestions" hidden></ul>
+    </div>
     <div class="field-pair">
       <label class="field">
         <span>Customer Contact</span>
-        <input type="text" id="f-customer_contact">
+        <input type="text" id="f-customer_contact" autocomplete="off">
+        <select id="f-contact_select" hidden></select>
       </label>
-      <label class="field">
-        <span>Customer Email</span>
+      <div class="field">
+        <span>Customer Email
+          <button type="button" class="link-btn" id="email-override" hidden>Override</button>
+        </span>
         <input type="email" id="f-customer_email">
-      </label>
+      </div>
     </div>
 
     <label class="field">

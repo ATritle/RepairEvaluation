@@ -24,8 +24,11 @@ class Report(BaseModel):
     repair_no: str = ""
     technician: str = ""
     customer: str = ""
+    customer_id: Optional[str] = None       # P21 customer_id when picked from P21
     customer_contact: str = ""
+    contact_id: Optional[str] = None        # P21 contacts.id when picked from P21
     customer_email: str = ""
+    email_override: bool = False            # user replaced the P21 email manually
     model: str = ""
     serial: str = ""
     customer_po: str = ""

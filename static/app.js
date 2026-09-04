@@ -21,6 +21,12 @@
     cards: [],
     pdfUrl: null,
     pdfName: "RepairEvaluation.pdf",
+    // Prophet 21 link state
+    p21Available: false,
+    customerId: null,
+    contactId: null,
+    contacts: [],
+    emailOverride: false,
   };
 
   let cfg = {
@@ -449,6 +455,9 @@
     for (const k of ["repair_no", "technician", "customer", "customer_contact", "customer_email", "model", "serial", "customer_po", "material"]) {
       data[k] = (data[k] || "").trim();
     }
+    data.customer_id = state.customerId;
+    data.contact_id = state.contactId;
+    data.email_override = state.emailOverride;
     data.photos = state.photos.map((p) => ({
       file: p.file,
       name: p.name || "",
@@ -476,6 +485,7 @@
       }
     }
     if (!$("#f-date").value) $("#f-date").value = todayIso();
+    restoreP21Link(data);
     state.photos = (data.photos || []).map((p) => ({
       file: p.file,
       name: p.name || "",
@@ -731,6 +741,258 @@
   document.addEventListener("click", () => { helpMenu.hidden = true; });
   $$("#help-menu button").forEach((b) => b.addEventListener("click", () => { helpMenu.hidden = true; showHelp(b.dataset.help); }));
 
+  // ------------------------------------------------------- Prophet 21 link
+  const custInput = $("#f-customer");
+  const custList = $("#customer-suggestions");
+  const custTag = $("#customer-id-tag");
+  const custClear = $("#customer-clear");
+  const contactInput = $("#f-customer_contact");
+  const contactSelect = $("#f-contact_select");
+  const emailInput = $("#f-customer_email");
+  const overrideBtn = $("#email-override");
+  let suggestTimer = null;
+  let suggestions = [];
+  let activeSuggestion = -1;
+  let suggestSeq = 0;
+
+  async function checkP21() {
+    const badge = $("#p21-badge");
+    try {
+      const st = await (await api("/api/p21/status")).json();
+      state.p21Available = !!st.available;
+      if (st.available) {
+        badge.textContent = `· linked to P21 (${st.server})`;
+        badge.classList.remove("off");
+        badge.title = `Connected as ${st.user}`;
+      } else {
+        badge.textContent = "· P21 offline, free text";
+        badge.classList.add("off");
+        badge.title = st.reason || "";
+        custInput.placeholder = "";
+      }
+    } catch (err) {
+      state.p21Available = false;
+      badge.textContent = "· P21 offline, free text";
+      badge.classList.add("off");
+      badge.title = err.message;
+      custInput.placeholder = "";
+    }
+  }
+
+  function hideSuggestions() {
+    custList.hidden = true;
+    custList.innerHTML = "";
+    suggestions = [];
+    activeSuggestion = -1;
+  }
+
+  function renderSuggestions(items, note) {
+    custList.innerHTML = "";
+    suggestions = items;
+    activeSuggestion = -1;
+    if (note) {
+      const li = document.createElement("li");
+      li.className = "info";
+      li.textContent = note;
+      custList.appendChild(li);
+    }
+    items.forEach((c, i) => {
+      const li = document.createElement("li");
+      const loc = [c.city, c.state].filter(Boolean).join(", ");
+      li.innerHTML = `<span>${esc(c.customer_name)}</span><span class="sub">#${esc(c.customer_id)}${loc ? " · " + esc(loc) : ""}</span>`;
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); selectCustomer(c); });
+      li.addEventListener("mousemove", () => setActiveSuggestion(i));
+      custList.appendChild(li);
+    });
+    custList.hidden = !(items.length || note);
+  }
+
+  function setActiveSuggestion(i) {
+    activeSuggestion = i;
+    $$("li", custList).filter((li) => !li.classList.contains("info")).forEach((li, k) => li.classList.toggle("active", k === i));
+  }
+
+  async function searchCustomers() {
+    const q = custInput.value.trim();
+    if (!state.p21Available || q.length < 2) { hideSuggestions(); return; }
+    const seq = ++suggestSeq;
+    try {
+      const res = await (await api(`/api/p21/customers?q=${encodeURIComponent(q)}&limit=25`)).json();
+      if (seq !== suggestSeq) return;               // a newer search finished first
+      if (document.activeElement !== custInput) return;
+      renderSuggestions(res, res.length ? null : "No P21 customers match");
+    } catch (err) {
+      if (seq === suggestSeq) renderSuggestions([], `P21 search failed: ${err.message}`);
+    }
+  }
+
+  function setCustomerLink(id) {
+    state.customerId = id;
+    custTag.textContent = id ? `P21 #${id}` : "";
+    custTag.hidden = !id;
+    custClear.hidden = !id;
+  }
+
+  function showContactMode(useSelect) {
+    contactSelect.hidden = !useSelect;
+    contactInput.hidden = useSelect;
+  }
+
+  function lockEmail(locked) {
+    emailInput.readOnly = locked;
+    emailInput.classList.toggle("locked", locked);
+  }
+
+  function updateOverrideUi() {
+    const linked = !!state.contactId;
+    overrideBtn.hidden = !linked;
+    if (!linked) { lockEmail(false); return; }
+    if (state.emailOverride) {
+      overrideBtn.textContent = "Use P21 email";
+      overrideBtn.title = "Discard the manual address and go back to the contact's P21 email";
+      lockEmail(false);
+    } else {
+      overrideBtn.textContent = "Override";
+      overrideBtn.title = "Enter a different email address for this report";
+      lockEmail(true);
+    }
+  }
+
+  function contactEmail(id) {
+    const c = state.contacts.find((x) => String(x.contact_id) === String(id));
+    return c ? (c.email_address || "") : "";
+  }
+
+  function fillContactSelect(selectedId) {
+    contactSelect.innerHTML = "";
+    const first = document.createElement("option");
+    first.value = "";
+    first.textContent = state.contacts.length ? "— select a contact —" : "— no contacts in P21 —";
+    contactSelect.appendChild(first);
+    for (const c of state.contacts) {
+      const o = document.createElement("option");
+      o.value = String(c.contact_id);
+      const extra = [c.title, c.email_address].filter(Boolean).join(" · ");
+      o.textContent = c.contact_name + (extra ? `  (${extra})` : "");
+      contactSelect.appendChild(o);
+    }
+    contactSelect.value = selectedId && state.contacts.some((c) => String(c.contact_id) === String(selectedId)) ? String(selectedId) : "";
+  }
+
+  async function loadContacts(customerId, keepContactId) {
+    try {
+      state.contacts = await (await api(`/api/p21/customers/${encodeURIComponent(customerId)}/contacts`)).json();
+    } catch (err) {
+      state.contacts = [];
+      toast(`Unable to load P21 contacts: ${err.message}`, true);
+    }
+    if (state.contacts.length) {
+      showContactMode(true);
+      fillContactSelect(keepContactId);
+      if (!contactSelect.value) {
+        state.contactId = null;
+        if (!keepContactId) contactInput.value = "";
+      }
+    } else {
+      showContactMode(false);
+      state.contactId = null;
+    }
+    updateOverrideUi();
+  }
+
+  async function selectCustomer(c) {
+    hideSuggestions();
+    custInput.value = c.customer_name;
+    setCustomerLink(c.customer_id);
+    state.contactId = null;
+    state.emailOverride = false;
+    contactInput.value = "";
+    emailInput.value = "";
+    markDirty();
+    await loadContacts(c.customer_id, null);
+  }
+
+  function clearCustomerLink({ keepText = true } = {}) {
+    setCustomerLink(null);
+    state.contacts = [];
+    state.contactId = null;
+    state.emailOverride = false;
+    showContactMode(false);
+    updateOverrideUi();
+    if (!keepText) custInput.value = "";
+  }
+
+  function onContactChosen() {
+    const id = contactSelect.value;
+    const c = state.contacts.find((x) => String(x.contact_id) === id);
+    state.contactId = c ? String(c.contact_id) : null;
+    contactInput.value = c ? c.contact_name : "";
+    if (c && !state.emailOverride) emailInput.value = c.email_address || "";
+    if (!c) { state.emailOverride = false; emailInput.value = ""; }
+    updateOverrideUi();
+    markDirty();
+  }
+
+  overrideBtn.addEventListener("click", () => {
+    if (!state.contactId) return;
+    state.emailOverride = !state.emailOverride;
+    if (state.emailOverride) {
+      updateOverrideUi();
+      emailInput.focus();
+      emailInput.select();
+    } else {
+      emailInput.value = contactEmail(state.contactId);
+      updateOverrideUi();
+    }
+    markDirty();
+  });
+
+  contactSelect.addEventListener("change", onContactChosen);
+  custClear.addEventListener("click", () => { clearCustomerLink({ keepText: false }); markDirty(); custInput.focus(); });
+
+  custInput.addEventListener("input", () => {
+    // Typing after a pick breaks the P21 link; the text stays as free text.
+    if (state.customerId) clearCustomerLink({ keepText: true });
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(searchCustomers, 250);
+  });
+  custInput.addEventListener("focus", () => { if (custInput.value.trim().length >= 2 && !state.customerId) searchCustomers(); });
+  custInput.addEventListener("blur", () => setTimeout(hideSuggestions, 150));
+  custInput.addEventListener("keydown", (e) => {
+    if (custList.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveSuggestion(Math.min(suggestions.length - 1, activeSuggestion + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveSuggestion(Math.max(0, activeSuggestion - 1)); }
+    else if (e.key === "Enter") { if (activeSuggestion >= 0) { e.preventDefault(); selectCustomer(suggestions[activeSuggestion]); } }
+    else if (e.key === "Escape") { e.stopPropagation(); hideSuggestions(); }
+  });
+
+  /** Re-establish the P21 link when a saved report is opened or a new one started. */
+  function restoreP21Link(data) {
+    hideSuggestions();
+    state.emailOverride = !!data.email_override;
+    if (data.customer_id && state.p21Available) {
+      setCustomerLink(String(data.customer_id));
+      state.contactId = data.contact_id ? String(data.contact_id) : null;
+      showContactMode(false);
+      updateOverrideUi();
+      loadContacts(String(data.customer_id), state.contactId).then(() => {
+        // Saved text wins over live P21 data so the report reopens as it was saved.
+        if (state.contactId) {
+          contactInput.value = data.customer_contact || contactInput.value;
+          emailInput.value = data.customer_email || emailInput.value;
+        }
+        updateOverrideUi();
+        clearDirty();
+      });
+    } else {
+      setCustomerLink(data.customer_id ? String(data.customer_id) : null);
+      state.contacts = [];
+      state.contactId = null;
+      showContactMode(false);
+      updateOverrideUi();
+    }
+  }
+
   // ---------------------------------------------------------------- wiring
   $("#btn-new").addEventListener("click", () => newReport());
   $("#btn-open").addEventListener("click", openReportDialog);
@@ -792,6 +1054,7 @@
     }
     fillSymbolSelect($("#zoom-symbol"));
     if (cfg.version) $("#about-version").textContent = `Version ${cfg.version}`;
+    await checkP21();
     newReport(true);
   }
 

@@ -45,6 +45,37 @@ Same workflow as the desktop app:
 The PDF layout and symbol geometry are ported line-for-line from the desktop
 app, so reports look the same.
 
+### Prophet 21 integration (customer / contact / email)
+
+The Customer field is a type-ahead against P21. Picking a customer:
+
+- stores the P21 `customer_id` with the report and shows a `P21 #id` tag
+- turns Customer Contact into a drop-down of **that customer's contacts only**
+  (contacts on the customer's corporate address plus contacts linked to any of
+  its ship-to addresses via `contacts_x_ship_to`)
+- fills Customer Email from the chosen contact and locks it. An **Override**
+  link unlocks the field for a one-off address; **Use P21 email** puts the
+  P21 address back. The override flag is saved with the report.
+
+Typing in the Customer box after a pick breaks the link and the fields go
+back to free text. If P21 is unreachable or no credentials are configured the
+form shows "P21 offline, free text" and behaves exactly like before.
+
+Connection settings live in `.env` (copy `.env.example`):
+
+```
+P21_SERVER=sql19
+P21_DATABASE=P21
+P21_USER=<read-only login>
+P21_PASSWORD=<password>
+P21_DRIVER=ODBC Driver 17 for SQL Server
+P21_COMPANY_ID=        # optional filter
+```
+
+All P21 queries are SELECT-only with `WITH (NOLOCK)`, run through a read-only
+pyodbc connection. Endpoints: `GET /api/p21/status`,
+`GET /api/p21/customers?q=`, `GET /api/p21/customers/{id}/contacts`.
+
 ### Where data is stored
 
 Everything lives under `data/` next to the app (ignored by git):
@@ -85,6 +116,9 @@ main.py           original desktop app (PyQt6)
 | POST | `/api/photos` | upload one or more images (multipart `files`) |
 | POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
 | GET | `/api/reports/{id}/pdf` | build a PDF from a saved report |
+| GET | `/api/p21/status` | P21 connectivity check |
+| GET | `/api/p21/customers?q=` | P21 customer type-ahead |
+| GET | `/api/p21/customers/{id}/contacts` | contacts for one P21 customer |
 
 Interactive docs: http://localhost:6969/docs
 

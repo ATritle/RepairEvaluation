@@ -1,0 +1,147 @@
+"""Read-only Prophet 21 lookups: customers and their contacts.
+
+pyodbc is synchronous, so every query runs in a worker thread via
+asyncio.to_thread. All SELECTs use WITH (NOLOCK) - this is a production ERP.
+"""
+import asyncio
+from typing import Any
+
+import pyodbc
+
+from .settings import get_settings
+
+CUSTOMER_SEARCH_SQL = """
+SELECT TOP (?)
+    c.customer_id,
+    c.customer_name,
+    a.city,
+    a.state,
+    c.company_id
+FROM P21.dbo.customer c WITH (NOLOCK)
+LEFT JOIN P21.dbo.address a WITH (NOLOCK) ON a.id = c.customer_id
+WHERE c.delete_flag = 'N'
+  AND (c.customer_name LIKE ? OR CAST(c.customer_id AS VARCHAR(20)) LIKE ?)
+  {company_filter}
+ORDER BY
+    CASE WHEN c.customer_name LIKE ? THEN 0 ELSE 1 END,
+    c.customer_name
+"""
+
+# Contacts attached to the customer's corporate address (contacts.address_id =
+# customer_id) plus contacts linked to any of the customer's ship-to addresses
+# through contacts_x_ship_to.
+CONTACTS_SQL = """
+SELECT DISTINCT
+    ct.id                                   AS contact_id,
+    LTRIM(RTRIM(ISNULL(ct.first_name, '') + ' ' + ISNULL(ct.last_name, ''))) AS contact_name,
+    ct.email_address,
+    ct.direct_phone,
+    ct.cellular,
+    ct.title
+FROM P21.dbo.contacts ct WITH (NOLOCK)
+WHERE ct.delete_flag = 'N'
+  AND (
+        ct.address_id = ?
+     OR ct.id IN (
+            SELECT cxs.id
+            FROM P21.dbo.contacts_x_ship_to cxs WITH (NOLOCK)
+            WHERE cxs.ship_to_id = ?
+               OR cxs.ship_to_id IN (
+                    SELECT s.ship_to_id
+                    FROM P21.dbo.ship_to s WITH (NOLOCK)
+                    WHERE s.customer_id = ?
+               )
+        )
+  )
+ORDER BY contact_name
+"""
+
+
+class P21Unavailable(Exception):
+    """Raised when P21 is not configured or cannot be reached."""
+
+
+def _connect() -> pyodbc.Connection:
+    s = get_settings()
+    if not s.p21_configured:
+        raise P21Unavailable("P21 credentials are not configured (see .env.example)")
+    try:
+        return pyodbc.connect(s.p21_connection_string, timeout=s.p21_timeout, readonly=True)
+    except pyodbc.Error as exc:
+        raise P21Unavailable(f"Unable to connect to P21: {str(exc)[:200]}") from exc
+
+
+def _rows(cursor: pyodbc.Cursor) -> list[dict[str, Any]]:
+    cols = [c[0] for c in cursor.description]
+    out = []
+    for row in cursor.fetchall():
+        d = {}
+        for k, v in zip(cols, row):
+            if isinstance(v, str):
+                v = v.strip()
+            d[k] = v
+        out.append(d)
+    return out
+
+
+def _search_customers_sync(query: str, limit: int) -> list[dict[str, Any]]:
+    s = get_settings()
+    like = f"%{query}%"
+    prefix = f"{query}%"
+    company_filter = "AND c.company_id = ?" if s.p21_company_id else ""
+    sql = CUSTOMER_SEARCH_SQL.format(company_filter=company_filter)
+    params: list[Any] = [limit, like, like]
+    if s.p21_company_id:
+        params.append(s.p21_company_id)
+    params.append(prefix)
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(sql, params)
+        rows = _rows(cur)
+    for r in rows:
+        r["customer_id"] = _fmt_id(r["customer_id"])
+    return rows
+
+
+def _contacts_sync(customer_id: str) -> list[dict[str, Any]]:
+    cid = _parse_id(customer_id)
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(CONTACTS_SQL, [cid, cid, cid])
+        rows = _rows(cur)
+    return rows
+
+
+def _ping_sync() -> dict[str, Any]:
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute("SELECT @@SERVERNAME, DB_NAME(), SUSER_SNAME()")
+        server, db, user = cur.fetchone()
+    return {"server": server, "database": db, "user": user}
+
+
+def _fmt_id(v: Any) -> str:
+    """P21 customer_id is DECIMAL(19,0); show it without a trailing '.0'."""
+    try:
+        return str(int(v))
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _parse_id(v: str) -> int:
+    try:
+        return int(str(v).strip())
+    except ValueError as exc:
+        raise ValueError(f"Invalid customer id: {v!r}") from exc
+
+
+async def search_customers(query: str, limit: int = 25) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_search_customers_sync, query, limit)
+
+
+async def customer_contacts(customer_id: str) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_contacts_sync, customer_id)
+
+
+async def ping() -> dict[str, Any]:
+    return await asyncio.to_thread(_ping_sync)

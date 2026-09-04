@@ -7,11 +7,11 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import storage
+from . import p21, storage
 from .config import (
     ALLOWED_IMAGE_EXT,
     APP_NAME,
@@ -99,6 +99,39 @@ async def api_upload_photos(files: list[UploadFile] = File(...)) -> list[Uploade
             raise HTTPException(status_code=400, detail=f"Unable to read {f.filename}: {exc}") from exc
         uploaded.append(UploadedPhoto(file=stored, name=f.filename or stored))
     return uploaded
+
+
+# --------------------------------------------------------------------------
+# Prophet 21 lookups (read-only)
+# --------------------------------------------------------------------------
+@app.get("/api/p21/status")
+async def api_p21_status() -> dict:
+    try:
+        info = await p21.ping()
+        return {"available": True, **info}
+    except p21.P21Unavailable as exc:
+        return {"available": False, "reason": str(exc)}
+
+
+@app.get("/api/p21/customers")
+async def api_p21_customers(q: str = Query("", min_length=0, max_length=100), limit: int = Query(25, ge=1, le=100)) -> list[dict]:
+    q = q.strip()
+    if len(q) < 2:
+        return []
+    try:
+        return await p21.search_customers(q, limit)
+    except p21.P21Unavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/p21/customers/{customer_id}/contacts")
+async def api_p21_contacts(customer_id: str) -> list[dict]:
+    try:
+        return await p21.customer_contacts(customer_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except p21.P21Unavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------------------
