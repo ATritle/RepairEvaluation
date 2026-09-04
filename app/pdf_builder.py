@@ -1,4 +1,8 @@
-"""ReportLab PDF generation - ported from the desktop RepairEvaluationWindow.build_pdf()."""
+"""ReportLab PDF generation.
+
+Symbol geometry in _draw_pdf_annotations() must stay in step with drawSymbol()
+in static/app.js so the on-screen preview and the PDF agree.
+"""
 import math
 import tempfile
 from datetime import datetime

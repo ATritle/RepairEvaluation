@@ -195,7 +195,6 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
         "customer_po": r.get("customer_po") or "",
         "material": r.get("material") or "",
         "customer_request": r.get("customer_request") or "",
-        "received_condition": r.get("received_condition") or "",
         "findings": r.get("findings") or "",
         "photos": [
             {
@@ -275,9 +274,9 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
                 f"""INSERT INTO {s}.revision
                     (evaluation_id, revision_no, saved_by, eval_date, technician, customer, customer_id,
                      customer_contact, contact_id, customer_email, email_override, model, serial,
-                     customer_po, material, customer_request, received_condition, findings)
+                     customer_po, material, customer_request, findings)
                     OUTPUT INSERTED.revision_id
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 [
                     evaluation_id, next_rev, saved_by, eval_date,
                     data.get("technician") or None, data.get("customer") or None, data.get("customer_id") or None,
@@ -285,8 +284,7 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
                     data.get("customer_email") or None, 1 if data.get("email_override") else 0,
                     data.get("model") or None, data.get("serial") or None,
                     data.get("customer_po") or None, data.get("material") or None,
-                    data.get("customer_request") or None, data.get("received_condition") or None,
-                    data.get("findings") or None,
+                    data.get("customer_request") or None, data.get("findings") or None,
                 ],
             )
             revision_id = int(cur.fetchone()[0])

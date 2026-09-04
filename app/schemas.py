@@ -115,7 +115,6 @@ class Report(BaseModel):
     customer_po: str = ""
     material: str = ""
     customer_request: str = ""
-    received_condition: str = ""
     findings: str = ""
     photos: list[Photo] = Field(default_factory=list, max_length=200)
 
@@ -147,7 +146,7 @@ class Report(BaseModel):
     def _po(cls, v: str) -> str:
         return clean_text(v, 100)
 
-    @field_validator("customer_request", "received_condition", "findings")
+    @field_validator("customer_request", "findings")
     @classmethod
     def _long(cls, v: str) -> str:
         return clean_text(v, 20000, multiline=True)

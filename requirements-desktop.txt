@@ -1,4 +1,0 @@
-# Dependencies for the original PyQt6 desktop app (main.py)
-PyQt6>=6.7
-reportlab>=4.2
-Pillow>=10.0

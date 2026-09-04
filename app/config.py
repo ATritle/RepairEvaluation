@@ -9,7 +9,6 @@ STATIC = ROOT / "static"
 DATA = ROOT / "data"
 PHOTOS_DIR = DATA / "photos"   # local cache of Forge photo bytes
 THUMBS_DIR = DATA / "thumbs"   # generated thumbnails for the library grid
-REPORTS_DIR = DATA / "reports"  # legacy JSON store (pre-Forge); no longer written
 
 APP_LOGO = ASSETS / "ifp_logo_app.png"
 PDF_LOGO = ASSETS / "ifp_logo.png"

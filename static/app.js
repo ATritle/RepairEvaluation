@@ -1,6 +1,5 @@
-/* IFP Repair Evaluation - web front end
- * Ports the PyQt6 desktop app (main.py) to the browser. Talks to the FastAPI
- * backend in app/main.py. No build step, no framework.
+/* IFP Repair Evaluation - web front end.
+ * Talks to the FastAPI backend in app/main.py. No build step, no framework.
  */
 (() => {
   "use strict";
@@ -101,8 +100,8 @@
   }
 
   // ---------------------------------------------------------- symbol drawing
-  // Mirrors PhotoCanvas.draw_symbol() in the desktop app so the browser
-  // preview and the PDF (app/pdf_builder.py) agree on geometry.
+  // Must stay in step with _draw_pdf_annotations() in app/pdf_builder.py so the
+  // on-screen preview and the PDF agree on geometry.
   function drawSymbol(ctx, symbol, x, y, base, symbolSize = 100, selected = false) {
     const size = Math.max(18, Math.min(70, base * 0.10)) * Math.max(0.25, symbolSize / 100);
     const lineWidth = Math.max(2, size * 0.065) + (selected ? 1.5 : 0);
@@ -458,7 +457,7 @@
 
   // ------------------------------------------------------------ form <-> data
   function collectData() {
-    const data = { received_condition: "" };
+    const data = {};
     for (const f of FIELDS) data[f] = $(`#f-${f}`).value;
     for (const k of ["repair_no", "technician", "customer", "customer_contact", "customer_email", "model", "serial", "customer_po", "material"]) {
       data[k] = (data[k] || "").trim();
