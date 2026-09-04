@@ -42,6 +42,25 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 
 
+@app.middleware("http")
+async def cache_headers(request: Request, call_next):
+    """Pages and our own JS/CSS must revalidate on every load so a deploy is
+    picked up immediately (phones cache aggressively when no header is sent).
+    Logos may be cached; photos set their own header."""
+    response = await call_next(request)
+    path = request.url.path
+    if "cache-control" not in response.headers:
+        if path.startswith("/static/") or response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        elif path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
+def _page(name: str) -> FileResponse:
+    return FileResponse(STATIC / name, headers={"Cache-Control": "no-cache"})
+
+
 def _who(request: Request) -> Optional[str]:
     """Best available identity for saved_by until the app has real auth."""
     for header in ("x-forwarded-user", "remote-user"):
@@ -72,7 +91,7 @@ def _forge_error(exc: Exception) -> HTTPException:
 
 @app.get("/", include_in_schema=False)
 async def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html")
+    return _page("index.html")
 
 
 @app.get("/r/{repair_no}", include_in_schema=False)
@@ -81,7 +100,7 @@ async def index() -> FileResponse:
 async def deep_link(repair_no: str, revision: Optional[int] = None) -> FileResponse:
     """Deep links into the form: /r/R123456 (latest), /r/R123456/v2. The page
     reads the path and loads that evaluation; the URL follows as you save."""
-    return FileResponse(STATIC / "index.html")
+    return _page("index.html")
 
 
 @app.get("/mobile", include_in_schema=False)
@@ -89,7 +108,7 @@ async def deep_link(repair_no: str, revision: Optional[int] = None) -> FileRespo
 async def mobile_page(repair_no: Optional[str] = None) -> FileResponse:
     """Phone-friendly capture page: repair number + camera, straight into the
     library. /mobile/R123456 opens pre-filled; the address follows the field."""
-    return FileResponse(STATIC / "mobile.html")
+    return _page("mobile.html")
 
 
 @app.get("/api/config")
