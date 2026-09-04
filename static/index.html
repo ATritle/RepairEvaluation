@@ -42,15 +42,21 @@
 </nav>
 
 <main class="content">
+  <div class="rev-banner" id="revision-banner" hidden>
+    <span id="revision-text"></span>
+    <button class="btn small" id="btn-history">History</button>
+  </div>
+
   <div class="section">REPAIR INFORMATION</div>
   <div class="info-grid">
+    <div class="field typeahead" id="repair-typeahead">
+      <span>Repair # <small class="muted" id="repair-hint"></small></span>
+      <input type="text" id="f-repair_no" placeholder="Type a repair number to find or start an evaluation" autocomplete="off">
+      <ul class="suggestions" id="repair-suggestions" hidden></ul>
+    </div>
     <label class="field">
       <span>Date</span>
       <input type="date" id="f-date">
-    </label>
-    <label class="field">
-      <span>Repair #</span>
-      <input type="text" id="f-repair_no" placeholder="R123456">
     </label>
 
     <div class="field typeahead" id="customer-typeahead">
@@ -167,11 +173,29 @@
     <div class="modal-body">
       <table class="report-table">
         <thead>
-          <tr><th>Repair #</th><th>Customer</th><th>Date</th><th>Technician</th><th>Photos</th><th>Saved</th><th></th></tr>
+          <tr><th>Repair #</th><th>Customer</th><th>Date</th><th>Technician</th><th>Photos</th><th>Rev</th><th>Last saved</th><th></th></tr>
         </thead>
         <tbody id="report-list"></tbody>
       </table>
       <div class="muted" id="report-empty" hidden>No saved evaluations yet.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Revision history -->
+<div class="modal" id="modal-history" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="history-title">Revision History</h2>
+      <button class="btn small" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <table class="report-table">
+        <thead>
+          <tr><th>Rev</th><th>Saved</th><th>By</th><th>Technician</th><th>Customer</th><th>Photos</th><th></th></tr>
+        </thead>
+        <tbody id="history-list"></tbody>
+      </table>
     </div>
   </div>
 </div>

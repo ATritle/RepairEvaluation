@@ -109,6 +109,22 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .inline input[type="number"] { width: 78px; }
 .muted { color: var(--muted); }
 
+/* ---------- Revision banner ---------- */
+.rev-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 12px; padding: 8px 12px; border-radius: 6px;
+  background: #24313a; border: 1px solid #3b5566; color: var(--text); font-size: 13px;
+}
+.rev-banner[hidden] { display: none; }
+.rev-banner.warn { background: #3a2a14; border-color: #7a5320; }
+.rev-banner.new { background: #1f2a1f; border-color: #35603a; }
+.rev-banner b { color: var(--cyan); }
+.rev-banner.warn b { color: var(--orange); }
+.suggestions li .rev { color: var(--cyan); font-size: 12px; }
+.suggestions li:hover .rev, .suggestions li.active .rev { color: #fff; }
+.report-table td.num { text-align: right; }
+.report-table tr.current td { color: var(--cyan); }
+
 /* ---------- P21 type-ahead ---------- */
 .typeahead { position: relative; }
 .input-with-tag { position: relative; display: flex; align-items: center; }

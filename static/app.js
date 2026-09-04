@@ -15,7 +15,12 @@
   ];
 
   const state = {
-    id: null,
+    // Evaluation loaded from Forge (null = brand-new, unsaved)
+    repairNo: null,
+    revisionNo: null,
+    currentRevisionNo: null,
+    savedAt: null,
+    savedBy: null,
     photos: [],
     dirty: false,
     cards: [],
@@ -450,7 +455,7 @@
 
   // ------------------------------------------------------------ form <-> data
   function collectData() {
-    const data = { id: state.id, received_condition: "" };
+    const data = { received_condition: "" };
     for (const f of FIELDS) data[f] = $(`#f-${f}`).value;
     for (const k of ["repair_no", "technician", "customer", "customer_contact", "customer_email", "model", "serial", "customer_po", "material"]) {
       data[k] = (data[k] || "").trim();
@@ -474,7 +479,11 @@
   }
 
   function loadData(data) {
-    state.id = data.id || null;
+    state.repairNo = data.revision_no ? (data.repair_no || null) : null;
+    state.revisionNo = data.revision_no || null;
+    state.currentRevisionNo = data.current_revision_no || null;
+    state.savedAt = data.saved_at || null;
+    state.savedBy = data.saved_by || null;
     for (const f of FIELDS) {
       const el = $(`#f-${f}`);
       if (f === "technician") {
@@ -497,6 +506,7 @@
     }));
     renderPhotos();
     clearDirty();
+    updateRevisionBanner();
   }
 
   function newReport(force = false) {
@@ -507,17 +517,34 @@
 
   async function saveReport() {
     const data = collectData();
+    if (!data.repair_no) {
+      toast("Enter a Repair # before saving", true);
+      $("#f-repair_no").focus();
+      return;
+    }
+    if (state.repairNo && state.repairNo !== data.repair_no) {
+      const ok = await confirmDialog(
+        "Save under a different repair number?",
+        `This was opened as ${state.repairNo}. Saving will store it as ${data.repair_no} instead ` +
+        `(a new revision of ${data.repair_no} if it already exists). ${state.repairNo} is left unchanged.`,
+      );
+      if (!ok) return;
+    }
     setStatus("Saving…");
     try {
-      const res = await api("/api/reports", {
+      const res = await api("/api/evaluations", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
       const saved = await res.json();
-      state.id = saved.id;
+      state.repairNo = saved.repair_no;
+      state.revisionNo = saved.revision_no;
+      state.currentRevisionNo = saved.current_revision_no;
+      state.savedAt = saved.saved_at;
+      state.savedBy = saved.saved_by;
       clearDirty();
-      const label = saved.repair_no || "evaluation";
-      setStatus(`Saved ${label} at ${new Date().toLocaleTimeString()}`);
-      toast("Evaluation saved");
+      updateRevisionBanner();
+      setStatus(`Saved ${saved.repair_no} revision ${saved.revision_no} at ${new Date().toLocaleTimeString()}`);
+      toast(`Saved ${saved.repair_no} as revision ${saved.revision_no}`);
     } catch (err) {
       toast(`Save failed: ${err.message}`, true);
       setStatus("");
@@ -544,51 +571,207 @@
   });
 
   // -------------------------------------------------------------- open list
+  function fmtWhen(iso) {
+    return iso ? new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "";
+  }
+
   async function openReportDialog() {
     const m = openModal("#modal-open");
     const tbody = $("#report-list");
-    tbody.innerHTML = "<tr><td colspan='7' class='muted'>Loading…</td></tr>";
+    tbody.innerHTML = "<tr><td colspan='8' class='muted'>Loading…</td></tr>";
     try {
-      const list = await (await api("/api/reports")).json();
+      const list = await (await api("/api/evaluations")).json();
       tbody.innerHTML = "";
       $("#report-empty").hidden = list.length > 0;
       for (const r of list) {
         const tr = document.createElement("tr");
-        const saved = r.updated_at ? new Date(r.updated_at).toLocaleString() : "";
         tr.innerHTML = `
-          <td><b>${esc(r.repair_no || "(no repair #)")}</b></td>
+          <td><b>${esc(r.repair_no)}</b></td>
           <td>${esc(r.customer)}</td>
           <td>${esc(r.date)}</td>
           <td>${esc(r.technician)}</td>
-          <td>${r.photo_count}</td>
-          <td class="muted">${esc(saved)}</td>
-          <td><button class="btn small danger" title="Delete">Delete</button></td>`;
-        tr.addEventListener("click", () => loadReport(r.id, m));
+          <td class="num">${r.photo_count}</td>
+          <td class="num">${r.revision_count}</td>
+          <td class="muted">${esc(fmtWhen(r.updated_at))}${r.saved_by ? " · " + esc(r.saved_by) : ""}</td>
+          <td><button class="btn small danger" title="Delete every revision of this evaluation">Delete</button></td>`;
+        tr.addEventListener("click", () => loadReport(r.repair_no, null, m));
         $("button", tr).addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!confirm(`Delete saved evaluation ${r.repair_no || r.id}? This cannot be undone.`)) return;
+          const ok = await confirmDialog(
+            `Delete ${r.repair_no}?`,
+            `This removes all ${r.revision_count} revision${r.revision_count === 1 ? "" : "s"} of ${r.repair_no} from Forge. It cannot be undone.`,
+          );
+          if (!ok) return;
           try {
-            await api(`/api/reports/${encodeURIComponent(r.id)}`, { method: "DELETE" });
-            if (state.id === r.id) state.id = null;
+            await api(`/api/evaluations/${encodeURIComponent(r.repair_no)}`, { method: "DELETE" });
+            if (state.repairNo === r.repair_no) { state.repairNo = null; state.revisionNo = null; state.currentRevisionNo = null; updateRevisionBanner(); }
             openReportDialog();
           } catch (err) { toast(`Delete failed: ${err.message}`, true); }
         });
         tbody.appendChild(tr);
       }
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan='7' class='muted'>Unable to load: ${esc(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan='8' class='muted'>Unable to load: ${esc(err.message)}</td></tr>`;
     }
   }
 
-  async function loadReport(id, modal) {
-    if (state.dirty && !confirm("This repair evaluation has unsaved changes. Open another anyway?")) return;
+  /** Load an evaluation (latest revision, or a specific one) into the form. */
+  /** True when nothing has been entered beyond the Repair # lookup itself. */
+  function formIsBlank() {
+    if (state.repairNo || state.photos.length) return false;
+    return ["customer", "customer_contact", "customer_email", "customer_po", "material", "model", "serial", "customer_request", "findings"]
+      .every((f) => !$(`#f-${f}`).value.trim());
+  }
+
+  async function loadReport(repairNo, revision, modal) {
+    if (state.dirty && !formIsBlank() &&
+        !(await confirmDialog("Discard unsaved changes?", "This repair evaluation has unsaved changes. Open another anyway?"))) return;
     try {
-      const data = await (await api(`/api/reports/${encodeURIComponent(id)}`)).json();
+      const url = `/api/evaluations/${encodeURIComponent(repairNo)}` + (revision ? `?revision=${revision}` : "");
+      const data = await (await api(url)).json();
       loadData(data);
-      closeModal(modal);
-      setStatus(`Opened ${data.repair_no || id}`);
+      if (modal) closeModal(modal);
+      hideRepairSuggestions();
+      setStatus(`Opened ${data.repair_no} revision ${data.revision_no}`);
     } catch (err) {
-      toast(`Unable to open report: ${err.message}`, true);
+      toast(`Unable to open evaluation: ${err.message}`, true);
+    }
+  }
+
+  // --------------------------------------------------- repair # type-ahead
+  const repairInput = $("#f-repair_no");
+  const repairList = $("#repair-suggestions");
+  const repairHint = $("#repair-hint");
+  let repairTimer = null;
+  let repairItems = [];
+  let repairActive = -1;
+  let repairSeq = 0;
+
+  function hideRepairSuggestions() {
+    repairList.hidden = true;
+    repairList.innerHTML = "";
+    repairItems = [];
+    repairActive = -1;
+  }
+
+  function setRepairActive(i) {
+    repairActive = i;
+    $$("li", repairList).forEach((li, k) => li.classList.toggle("active", k === i));
+  }
+
+  async function searchRepairs() {
+    const q = repairInput.value.trim();
+    if (q.length < 1) { hideRepairSuggestions(); repairHint.textContent = ""; return; }
+    const seq = ++repairSeq;
+    try {
+      const res = await (await api(`/api/evaluations?q=${encodeURIComponent(q)}&limit=15`)).json();
+      if (seq !== repairSeq || document.activeElement !== repairInput) return;
+      repairItems = res;
+      repairList.innerHTML = "";
+      for (const r of res) {
+        const li = document.createElement("li");
+        li.innerHTML = `<span><b>${esc(r.repair_no)}</b>${r.customer ? " - " + esc(r.customer) : ""}</span>` +
+          `<span class="sub"><span class="rev">rev ${r.revision_count}</span> · ${esc(fmtWhen(r.updated_at))}</span>`;
+        li.addEventListener("mousedown", (e) => { e.preventDefault(); loadReport(r.repair_no, null, null); });
+        repairList.appendChild(li);
+      }
+      repairActive = -1;
+      repairList.hidden = res.length === 0;
+      const exact = res.find((r) => r.repair_no.toLowerCase() === q.toLowerCase());
+      if (exact && exact.repair_no !== state.repairNo) {
+        repairHint.textContent = `· ${exact.repair_no} exists (${exact.revision_count} rev) — pick it to load`;
+      } else if (!exact && q !== state.repairNo) {
+        repairHint.textContent = "· new evaluation";
+      } else {
+        repairHint.textContent = "";
+      }
+    } catch (err) {
+      if (seq === repairSeq) repairHint.textContent = `· lookup failed: ${err.message}`;
+    }
+    updateRevisionBanner();
+  }
+
+  repairInput.addEventListener("input", () => {
+    clearTimeout(repairTimer);
+    repairTimer = setTimeout(searchRepairs, 200);
+  });
+  repairInput.addEventListener("focus", () => { if (repairInput.value.trim()) searchRepairs(); });
+  repairInput.addEventListener("blur", () => setTimeout(hideRepairSuggestions, 150));
+  repairInput.addEventListener("keydown", (e) => {
+    if (repairList.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setRepairActive(Math.min(repairItems.length - 1, repairActive + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setRepairActive(Math.max(0, repairActive - 1)); }
+    else if (e.key === "Enter") { if (repairActive >= 0) { e.preventDefault(); loadReport(repairItems[repairActive].repair_no, null, null); } }
+    else if (e.key === "Escape") { e.stopPropagation(); hideRepairSuggestions(); }
+  });
+
+  // ------------------------------------------------------ revision banner
+  function updateRevisionBanner() {
+    const banner = $("#revision-banner");
+    const text = $("#revision-text");
+    const typed = repairInput.value.trim();
+    banner.classList.remove("warn", "new");
+    $("#btn-history").hidden = !state.repairNo;
+
+    if (!state.repairNo) {
+      if (!typed) { banner.hidden = true; return; }
+      banner.hidden = false;
+      banner.classList.add("new");
+      text.innerHTML = `<b>${esc(typed)}</b> — new evaluation. Saving creates revision 1.`;
+      return;
+    }
+    banner.hidden = false;
+    const who = state.savedBy ? ` by ${esc(state.savedBy)}` : "";
+    if (typed && typed !== state.repairNo) {
+      banner.classList.add("warn");
+      text.innerHTML = `Opened as <b>${esc(state.repairNo)}</b> but Repair # now reads <b>${esc(typed)}</b>. Saving stores it under ${esc(typed)}.`;
+    } else if (state.revisionNo < state.currentRevisionNo) {
+      banner.classList.add("warn");
+      text.innerHTML = `<b>${esc(state.repairNo)}</b> — viewing revision <b>${state.revisionNo}</b> of ${state.currentRevisionNo}, saved ${esc(fmtWhen(state.savedAt))}${who}. ` +
+        `Saving creates revision ${state.currentRevisionNo + 1} from this version.`;
+    } else {
+      text.innerHTML = `<b>${esc(state.repairNo)}</b> — revision <b>${state.revisionNo}</b> (latest), saved ${esc(fmtWhen(state.savedAt))}${who}. ` +
+        `Saving creates revision ${state.currentRevisionNo + 1}.`;
+    }
+  }
+
+  async function openHistory() {
+    if (!state.repairNo) return;
+    const m = openModal("#modal-history");
+    $("#history-title").textContent = `Revision History — ${state.repairNo}`;
+    const tbody = $("#history-list");
+    tbody.innerHTML = "<tr><td colspan='7' class='muted'>Loading…</td></tr>";
+    try {
+      const revs = await (await api(`/api/evaluations/${encodeURIComponent(state.repairNo)}/revisions`)).json();
+      tbody.innerHTML = "";
+      for (const r of revs) {
+        const tr = document.createElement("tr");
+        if (r.revision_no === state.revisionNo) tr.classList.add("current");
+        tr.innerHTML = `
+          <td class="num"><b>${r.revision_no}</b>${r.revision_no === state.currentRevisionNo ? " <span class='muted'>(latest)</span>" : ""}</td>
+          <td>${esc(fmtWhen(r.saved_at))}</td>
+          <td>${esc(r.saved_by || "")}</td>
+          <td>${esc(r.technician)}</td>
+          <td>${esc(r.customer)}</td>
+          <td class="num">${r.photo_count}</td>
+          <td><button class="btn small">${r.revision_no === state.revisionNo ? "Reload" : "View"}</button></td>`;
+        const open = () => loadReport(state.repairNo, r.revision_no, m);
+        tr.addEventListener("click", open);
+        $("button", tr).addEventListener("click", (e) => { e.stopPropagation(); open(); });
+        tbody.appendChild(tr);
+      }
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan='7' class='muted'>Unable to load history: ${esc(err.message)}</td></tr>`;
+    }
+  }
+  $("#btn-history").addEventListener("click", openHistory);
+
+  async function checkStorage() {
+    try {
+      const st = await (await api("/api/storage/status")).json();
+      if (!st.available) toast(`Storage offline: ${st.reason}`, true);
+    } catch (err) {
+      toast(`Storage check failed: ${err.message}`, true);
     }
   }
 
@@ -1085,7 +1268,7 @@
     }
     fillSymbolSelect($("#zoom-symbol"));
     if (cfg.version) $("#about-version").textContent = `Version ${cfg.version}`;
-    await checkP21();
+    await Promise.all([checkP21(), checkStorage()]);
     newReport(true);
   }
 

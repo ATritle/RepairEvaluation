@@ -20,12 +20,16 @@ SELECT TOP (?)
 FROM {db}.dbo.customer c WITH (NOLOCK)
 LEFT JOIN {db}.dbo.address a WITH (NOLOCK) ON a.id = c.customer_id
 WHERE c.delete_flag = 'N'
-  AND (c.customer_name LIKE ? OR CAST(c.customer_id AS VARCHAR(20)) LIKE ?)
+  AND (c.customer_name LIKE ? ESCAPE '\\' OR CAST(c.customer_id AS VARCHAR(20)) LIKE ? ESCAPE '\\')
   {company_filter}
 ORDER BY
-    CASE WHEN c.customer_name LIKE ? THEN 0 ELSE 1 END,
+    CASE WHEN c.customer_name LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END,
     c.customer_name
 """
+
+
+def _like_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("[", "\\[")
 
 # Contacts for a customer, in P21 terms:
 #   1. oe_contacts_customer - the Customer Maintenance "Contacts" link table
@@ -99,8 +103,9 @@ def _rows(cursor: pyodbc.Cursor) -> list[dict[str, Any]]:
 
 def _search_customers_sync(query: str, limit: int) -> list[dict[str, Any]]:
     s = get_settings()
-    like = f"%{query}%"
-    prefix = f"{query}%"
+    q = _like_escape(query.strip()[:100])
+    like = f"%{q}%"
+    prefix = f"{q}%"
     company_filter = "AND c.company_id = ?" if s.p21_company_id else ""
     sql = CUSTOMER_SEARCH_SQL.format(db=s.p21_database, company_filter=company_filter)
     params: list[Any] = [limit, like, like]

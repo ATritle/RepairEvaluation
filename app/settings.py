@@ -15,6 +15,26 @@ class Settings(BaseSettings):
     p21_company_id: str = ""  # optional filter, blank = all companies
     p21_timeout: int = 8
 
+    # Forge (app storage)
+    forge_server: str = "sql19"
+    forge_database: str = "Forge"
+    forge_schema: str = "RepairEval"
+    forge_user: str = ""
+    forge_password: str = ""
+    forge_driver: str = "ODBC Driver 17 for SQL Server"
+    forge_timeout: int = 10
+
+    @property
+    def forge_configured(self) -> bool:
+        return bool(self.forge_user and self.forge_password)
+
+    @property
+    def forge_connection_string(self) -> str:
+        return (
+            f"DRIVER={{{self.forge_driver}}};SERVER={self.forge_server};DATABASE={self.forge_database};"
+            f"UID={self.forge_user};PWD={self.forge_password};TrustServerCertificate=yes;Encrypt=no"
+        )
+
     @property
     def p21_configured(self) -> bool:
         return bool(self.p21_user and self.p21_password)

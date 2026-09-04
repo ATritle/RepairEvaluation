@@ -1,4 +1,4 @@
-"""Photo normalisation - ported from the desktop optimize_uploaded_image()."""
+"""Photo normalisation and the local disk cache for photo bytes stored in Forge."""
 import io
 import uuid
 from pathlib import Path
@@ -12,15 +12,13 @@ MAX_EDGE = 2000
 JPEG_QUALITY = 82
 
 
-def optimize_uploaded_bytes(raw: bytes) -> str:
+def optimize_uploaded_bytes(raw: bytes) -> tuple[str, bytes, int, int]:
     """
     Apply EXIF orientation, flatten alpha onto white, limit the longest edge
-    to 2000px and store as optimised progressive JPEG (quality 82).
-    Returns the stored filename inside PHOTOS_DIR.
+    to 2000px and encode as optimised progressive JPEG (quality 82).
+    Returns (file_name, jpeg_bytes, width, height). Nothing is written to disk.
     """
-    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid.uuid4().hex}.jpg"
-    output = PHOTOS_DIR / filename
 
     with PILImage.open(io.BytesIO(raw)) as im:
         try:
@@ -43,12 +41,20 @@ def optimize_uploaded_bytes(raw: bytes) -> str:
                 PILImage.Resampling.LANCZOS,
             )
 
-        im.save(output, format="JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
-
-    return filename
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
+        return filename, out.getvalue(), im.width, im.height
 
 
 def photo_path(filename: str) -> Path:
-    """Resolve a stored photo filename, refusing path traversal."""
-    safe = Path(filename).name
-    return PHOTOS_DIR / safe
+    """Local cache location for a stored photo (may not exist yet)."""
+    return PHOTOS_DIR / Path(filename).name
+
+
+def cache_photo(filename: str, content: bytes) -> Path:
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    p = photo_path(filename)
+    tmp = p.with_suffix(".part")
+    tmp.write_bytes(content)
+    tmp.replace(p)
+    return p

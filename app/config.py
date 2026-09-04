@@ -8,7 +8,7 @@ ASSETS = ROOT / "assets"
 STATIC = ROOT / "static"
 DATA = ROOT / "data"
 PHOTOS_DIR = DATA / "photos"
-REPORTS_DIR = DATA / "reports"
+REPORTS_DIR = DATA / "reports"  # legacy JSON store (pre-Forge); no longer written
 
 APP_LOGO = ASSETS / "ifp_logo_app.png"
 PDF_LOGO = ASSETS / "ifp_logo.png"

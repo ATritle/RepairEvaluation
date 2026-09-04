@@ -36,7 +36,7 @@ Same workflow as the desktop app:
   mark; click to place, click to select, drag to move, Delete to remove,
   Size 25–300 % (default 250 %), Clear Markups
 - Open Photo / Zoom dialog with a 25–300 % zoom slider
-- Save / Open evaluations (stored on the server, see below)
+- Save / Open evaluations in Forge with full revision history (see below)
 - Preview PDF (in-page viewer) and Print / Save PDF (download)
 - Help menu (How to Use, Photo Markup, Keyboard Shortcuts, About)
 - Shortcuts: Ctrl+S save, Ctrl+O open, Ctrl+P preview, F1 help
@@ -74,23 +74,52 @@ P21_USER=<read-only login>
 P21_PASSWORD=<password>
 P21_DRIVER=ODBC Driver 17 for SQL Server
 P21_COMPANY_ID=        # optional filter
+
+FORGE_SERVER=sql19
+FORGE_DATABASE=Forge
+FORGE_SCHEMA=RepairEval
+FORGE_USER=<login with read/write on Forge.RepairEval>
+FORGE_PASSWORD=<password>
 ```
 
 All P21 queries are SELECT-only with `WITH (NOLOCK)`, run through a read-only
 pyodbc connection. Endpoints: `GET /api/p21/status`,
 `GET /api/p21/customers?q=`, `GET /api/p21/customers/{id}/contacts`.
 
-### Where data is stored
+### Where data is stored (Forge)
 
-Everything lives under `data/` next to the app (ignored by git):
+Evaluations live in the **Forge** database, schema **`RepairEval`**
+(`sql/001_repaireval_schema.sql`, fully qualified so it can be run from
+`master` in SSMS; the app can also run it with a db_owner login).
 
-```
-data/photos/<uuid>.jpg      normalised photos (2000 px max edge, JPEG q82)
-data/reports/<id>.json      saved evaluations
-```
+- **One evaluation per repair number.** The Repair # is the first field and
+  doubles as the lookup: type it and matching evaluations appear; pick one to
+  load it. A number nobody has used starts a new evaluation.
+- **Every Save is a new revision.** Nothing is updated in place. The banner
+  above the form shows which revision is loaded; **History** lists all
+  revisions and lets you view any of them. Saving while viewing an old
+  revision creates a new latest revision from that version.
+- Photo bytes are stored in Forge too (`RepairEval.photo_file`, shared across
+  revisions by file name). `data/photos/` is only a local cache.
 
-Photos are optimised on upload exactly like the desktop app (EXIF orientation
-applied, alpha flattened to white, resized, progressive JPEG).
+Tables: `evaluation` (repair number, current revision), `revision` (all form
+fields + saved_at / saved_by), `revision_photo` (order, description,
+rotation), `photo_annotation` (symbol, x, y, size per markup), `photo_file`
+(JPEG bytes).
+
+`saved_by` records the client address for now; switch it to the login name
+once the app sits behind authentication (the `X-Forwarded-User` header is
+honoured if a proxy supplies it).
+
+### Input hardening
+
+All SQL is parameterised (pyodbc `?` placeholders); table names come from
+configuration, never from requests. Free text is scrubbed in the Pydantic
+models (control characters removed, CRLF normalised, lengths capped to the
+column sizes), LIKE searches escape `% _ [`, photo references must match the
+server-generated `<32 hex>.jpg` pattern, P21 ids must be numeric, and Repair #
+is limited to letters, digits, space, `. _ / -`. Text is escaped before it is
+placed in the PDF or rendered in the page.
 
 ### Layout
 
@@ -99,7 +128,8 @@ app/
   main.py         FastAPI app + API routes
   config.py       paths, technician list, symbol list
   schemas.py      Pydantic models (Report, Photo, Annotation)
-  storage.py      JSON report storage
+  forge.py        Forge (RepairEval schema) storage
+  settings.py     .env settings (P21 + Forge)
   images.py       photo normalisation
   pdf_builder.py  ReportLab PDF (ported from main.py)
 static/
@@ -113,13 +143,15 @@ main.py           original desktop app (PyQt6)
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/config` | technicians + symbols |
-| GET | `/api/reports` | list saved evaluations |
-| GET | `/api/reports/{id}` | load one |
-| POST | `/api/reports` | create/update (body = report JSON) |
-| DELETE | `/api/reports/{id}` | delete |
+| GET | `/api/evaluations?q=` | list / search evaluations (latest revision each) |
+| GET | `/api/evaluations/{repair_no}?revision=n` | load latest (or a specific) revision |
+| GET | `/api/evaluations/{repair_no}/revisions` | revision history |
+| POST | `/api/evaluations` | save = append a revision (body = report JSON) |
+| DELETE | `/api/evaluations/{repair_no}` | delete an evaluation and all revisions |
+| GET | `/api/storage/status` | Forge connectivity check |
 | POST | `/api/photos` | upload one or more images (multipart `files`) |
 | POST | `/api/pdf?download=0|1` | build a PDF from the posted report |
-| GET | `/api/reports/{id}/pdf` | build a PDF from a saved report |
+| GET | `/api/evaluations/{repair_no}/pdf?revision=n` | build a PDF from a saved revision |
 | GET | `/api/p21/status` | P21 connectivity check |
 | GET | `/api/p21/customers?q=` | P21 customer type-ahead |
 | GET | `/api/p21/customers/{id}/contacts` | contacts for one P21 customer |
