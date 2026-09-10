@@ -506,6 +506,7 @@
     for (const k of ["repair_no", "technician", "customer", "customer_contact", "customer_email", "model", "serial", "customer_po", "material"]) {
       data[k] = (data[k] || "").trim();
     }
+    data.repair_no = data.repair_no.toUpperCase();
     data.customer_id = state.customerId;
     data.contact_id = state.contactId;
     data.email_override = state.emailOverride;
@@ -946,7 +947,11 @@
     for (const it of libraryItems) if (!onReport.has(it.file)) librarySelected.add(it.file);
     renderLibrary();
   });
-  repairInput.addEventListener("change", refreshLibraryCount);
+  repairInput.addEventListener("change", () => {
+    const up = repairInput.value.trim().toUpperCase();
+    if (repairInput.value !== up) { repairInput.value = up; updateRevisionBanner(); }
+    refreshLibraryCount();
+  });
 
   async function checkStorage() {
     try {

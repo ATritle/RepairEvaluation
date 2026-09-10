@@ -15,6 +15,9 @@ starts the server on http://localhost:6969 and opens your browser.
 
 ### Manual start
 
+Use a virtual environment; the shared global Python on the dev box has drifted
+before (Starlette upgraded under an older FastAPI) and broke the import.
+
 ```
 python -m venv .venv
 .venv\Scripts\Activate.ps1

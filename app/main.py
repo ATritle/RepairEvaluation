@@ -73,7 +73,9 @@ _REPAIR_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._/\-]{0,49}$")
 
 
 def _check_repair_no(repair_no: str) -> str:
-    repair_no = clean_text(repair_no, 50)
+    """Validate and normalise a repair number. Upper-cased so the phone page,
+    the desktop form and the API all agree on the key."""
+    repair_no = clean_text(repair_no, 50).upper()
     if not _REPAIR_NO_RE.fullmatch(repair_no):
         raise HTTPException(status_code=400, detail="Repair # may only contain letters, digits, space, . _ / -")
     return repair_no
@@ -151,7 +153,7 @@ async def api_list_evaluations(
 
 async def _load(repair_no: str, revision: Optional[int]) -> Report:
     try:
-        return Report(**(await forge.load_evaluation(repair_no, revision)))
+        return Report(**(await forge.load_evaluation(_check_repair_no(repair_no), revision)))
     except Exception as exc:
         raise _forge_error(exc) from exc
 
@@ -178,7 +180,7 @@ async def api_get_revision(repair_no: str, revision: int) -> Report:
 @app.get("/api/evaluations/{repair_no}/revisions", response_model=list[RevisionSummary])
 async def api_list_revisions(repair_no: str) -> list[RevisionSummary]:
     try:
-        return [RevisionSummary(**r) for r in await forge.list_revisions(repair_no)]
+        return [RevisionSummary(**r) for r in await forge.list_revisions(_check_repair_no(repair_no))]
     except Exception as exc:
         raise _forge_error(exc) from exc
 
@@ -205,7 +207,7 @@ async def api_save_evaluation(report: Report, request: Request) -> Report:
 async def api_delete_evaluation(repair_no: str) -> JSONResponse:
     """Delete an evaluation and every revision of it."""
     try:
-        if not await forge.delete_evaluation(repair_no):
+        if not await forge.delete_evaluation(_check_repair_no(repair_no)):
             raise HTTPException(status_code=404, detail="Evaluation not found")
     except HTTPException:
         raise
