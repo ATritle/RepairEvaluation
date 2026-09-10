@@ -86,7 +86,7 @@ FORGE_USER=<login with read/write on Forge.RepairEval>
 FORGE_PASSWORD=<password>
 
 PHOTO_STORE=fs                    # fs = files under PHOTO_FS_ROOT, db = VARBINARY in Forge
-PHOTO_FS_ROOT=data/photo_store    # local folder now; \\server\share\RepairEval later
+PHOTO_FS_ROOT=\\eha-serv.ifp.eha\data\Apps\RepairEval\photos   # the N drive (N:\Apps\RepairEval\photos)
 ```
 
 All P21 queries are SELECT-only with `WITH (NOLOCK)`, run through a read-only
@@ -108,10 +108,13 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
   revision creates a new latest revision from that version.
 - Photo **metadata** is always in Forge (`RepairEval.photo_file`, shared across
   revisions by file name). Photo **bytes** go where `PHOTO_STORE` says:
-  `fs` (default) writes files under `PHOTO_FS_ROOT/<yyyy>/<mm>/<file>.jpg`, a
-  local folder for now and a UNC share later with no code change; `db` keeps
-  them as VARBINARY in the same row. Each row records which, so both can
-  coexist. `data/photos/` is only a local cache used by the PDF builder.
+  `fs` (default) writes files under `PHOTO_FS_ROOT/<yyyy>/<mm>/<file>.jpg`,
+  which is the N drive: `\\eha-serv.ifp.eha\data\Apps\RepairEval\photos`
+  (`N:\Apps\RepairEval\photos`). Use the UNC path, not the drive letter, so a
+  service account can reach it. `db` keeps bytes as VARBINARY in the same row.
+  Each row records which, so both can coexist; `scripts/migrate_photos.py`
+  moves existing photos to the configured root. `data/photos/` is only a local
+  cache used by the PDF builder.
 
 Tables: `evaluation` (repair number, current revision), `revision` (all form
 fields + saved_at / saved_by), `revision_photo` (order, description,
