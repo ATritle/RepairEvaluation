@@ -6,6 +6,7 @@
   "use strict";
   const $ = (s) => document.querySelector(s);
   const repair = $("#repair"), status = $("#status"), grid = $("#grid"), empty = $("#empty");
+  const tech = $("#tech");
   const camBtn = $("#btn-camera"), galBtn = $("#btn-gallery"), cam = $("#cam"), gal = $("#gal");
   const progress = $("#progress"), bar = $("#bar");
   const REPAIR_RE = /^[A-Za-z0-9][A-Za-z0-9 ._/\-]{0,49}$/;
@@ -25,10 +26,35 @@
     if (location.pathname + location.search !== path) history.replaceState(null, "", path);
   }
 
+  // Phones have no domain login, so the technician picks their name once; it is
+  // remembered on the device and sent with every upload as uploaded_by.
+  async function loadTechnicians() {
+    try {
+      const cfg = await (await fetch("/api/config")).json();
+      for (const t of cfg.technicians || []) {
+        const o = document.createElement("option"); o.value = t; o.textContent = t; tech.appendChild(o);
+      }
+    } catch (_) { /* leave the picker empty; upload will explain */ }
+    let saved = "";
+    try { saved = localStorage.getItem("ifp_mobile_tech") || ""; } catch (_) { /* ignore */ }
+    if (saved && [...tech.options].some((o) => o.value === saved)) tech.value = saved;
+    updateButtons();
+  }
+  tech.addEventListener("change", () => {
+    try { localStorage.setItem("ifp_mobile_tech", tech.value); } catch (_) { /* ignore */ }
+    updateButtons();
+    if (tech.value && !repair.value) repair.focus();
+  });
+
+  function updateButtons() {
+    const ok = REPAIR_RE.test(current) && !!tech.value;
+    camBtn.disabled = galBtn.disabled = !ok;
+  }
+
   function setRepair(v) {
     current = (v || "").trim().toUpperCase();
     const ok = REPAIR_RE.test(current);
-    camBtn.disabled = galBtn.disabled = !ok;
+    updateButtons();
     syncUrl();
     if (!current) { status.textContent = "Enter the repair number first."; grid.innerHTML = ""; empty.hidden = true; return; }
     if (!ok) { status.textContent = "Letters, digits, space, . _ / - only."; return; }
@@ -67,8 +93,10 @@
 
   function upload(files) {
     if (!files.length || !REPAIR_RE.test(current)) return;
+    if (!tech.value) { toast("Pick your name first", true); tech.focus(); return; }
     const fd = new FormData();
     fd.append("repair_no", current);
+    fd.append("uploaded_by", tech.value);
     for (const f of files) fd.append("files", f, f.name || "photo.jpg");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/mobile/photos");
@@ -76,7 +104,7 @@
     camBtn.disabled = galBtn.disabled = true;
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) bar.style.width = `${Math.round(e.loaded / e.total * 100)}%`; };
     xhr.onload = () => {
-      progress.hidden = true; camBtn.disabled = galBtn.disabled = false;
+      progress.hidden = true; updateButtons();
       if (xhr.status >= 200 && xhr.status < 300) {
         const n = JSON.parse(xhr.responseText).length;
         toast(`Uploaded ${n} photo${n === 1 ? "" : "s"} to ${current}`);
@@ -88,7 +116,7 @@
         toast(`Upload failed: ${typeof msg === "string" ? msg : JSON.stringify(msg)}`, true);
       }
     };
-    xhr.onerror = () => { progress.hidden = true; camBtn.disabled = galBtn.disabled = false; toast("Upload failed: network error", true); };
+    xhr.onerror = () => { progress.hidden = true; updateButtons(); toast("Upload failed: network error", true); };
     xhr.send(fd);
   }
 
@@ -120,6 +148,7 @@
   const initial = pathMatch ? decodeURIComponent(pathMatch[1]) : (new URLSearchParams(location.search).get("r") || "");
   repair.value = initial;
   setRepair(initial);
+  loadTechnicians();
   if (!initial) {
     let last = "";
     try { last = localStorage.getItem("ifp_mobile_repair") || ""; } catch (_) { /* ignore */ }
@@ -127,7 +156,7 @@
       status.innerHTML = `Enter the repair number, or continue with <button type="button" class="link-btn" id="use-last">${esc(last)}</button>`;
       $("#use-last").addEventListener("click", () => { repair.value = last; setRepair(last); });
     }
-    repair.focus();
+    if (tech.value) repair.focus();
   }
   loadRecent();
   setInterval(() => { if (REPAIR_RE.test(current)) loadLibrary(); }, 30000);

@@ -481,6 +481,7 @@
     const fd = new FormData();
     const rn = $("#f-repair_no").value.trim();
     if (rn) fd.append("repair_no", rn);   // also files the photos in this repair's library
+    fd.append("uploaded_by", $("#f-technician").value || "");
     for (const f of files) fd.append("files", f, f.name);
     setStatus(`Uploading ${files.length} photo${files.length === 1 ? "" : "s"}…`);
     try {

@@ -61,12 +61,21 @@ def _page(name: str) -> FileResponse:
     return FileResponse(STATIC / name, headers={"Cache-Control": "no-cache"})
 
 
-def _who(request: Request) -> Optional[str]:
-    """Best available identity for saved_by until the app has real auth."""
+def _who(request: Request, declared: Optional[str] = None) -> Optional[str]:
+    """Identity recorded on saved_by / uploaded_by.
+
+    Precedence: a user header from an authenticating proxy (real identity) >
+    the technician the user picked in the UI (self-declared, must be on the
+    configured list) > the client address. The address is kept alongside a
+    declared name so a self-declared entry is still traceable."""
     for header in ("x-forwarded-user", "remote-user"):
         if request.headers.get(header):
             return clean_text(request.headers[header], 100) or None
-    return request.client.host if request.client else None
+    ip = request.client.host if request.client else ""
+    name = clean_text(declared, 100)
+    if name and name.upper() in {t.upper() for t in TECHNICIANS}:
+        return f"{name.upper()} @{ip}"[:100] if ip else name.upper()
+    return ip or None
 
 
 _REPAIR_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._/\-]{0,49}$")
@@ -195,7 +204,7 @@ async def api_save_evaluation(report: Report, request: Request) -> Report:
         for photo in report.photos:
             if not await photo_store.exists(photo.file):
                 raise HTTPException(status_code=400, detail=f"Photo missing on server: {photo.file}")
-        saved = await forge.save_evaluation(report.model_dump(), _who(request))
+        saved = await forge.save_evaluation(report.model_dump(), _who(request, report.technician))
         return Report(**saved)
     except HTTPException:
         raise
@@ -246,11 +255,11 @@ async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no:
 
 @app.post("/api/photos", response_model=list[UploadedPhoto])
 async def api_upload_photos(
-    request: Request, files: list[UploadFile] = File(...), repair_no: str = Form("")
+    request: Request, files: list[UploadFile] = File(...), repair_no: str = Form(""), uploaded_by: str = Form("")
 ) -> list[UploadedPhoto]:
     """Desktop upload. If the form already has a Repair #, the photos also land in its library."""
     rn = _check_repair_no(repair_no) if repair_no.strip() else None
-    return await _store_uploads(files, _who(request), rn, "web")
+    return await _store_uploads(files, _who(request, uploaded_by), rn, "web")
 
 
 # --------------------------------------------------------------------------
@@ -258,11 +267,14 @@ async def api_upload_photos(
 # --------------------------------------------------------------------------
 @app.post("/api/mobile/photos", response_model=list[UploadedPhoto])
 async def api_mobile_upload(
-    request: Request, repair_no: str = Form(...), files: list[UploadFile] = File(...)
+    request: Request, repair_no: str = Form(...), files: list[UploadFile] = File(...), uploaded_by: str = Form("")
 ) -> list[UploadedPhoto]:
-    """Phone capture: repair number + one or more photos -> library."""
+    """Phone capture: repair number + one or more photos -> library. The phone
+    has no domain user, so the technician picked on the page is recorded."""
     rn = _check_repair_no(repair_no)
-    return await _store_uploads(files, _who(request), rn, "mobile")
+    if not clean_text(uploaded_by, 100):
+        raise HTTPException(status_code=400, detail="Pick who you are before uploading")
+    return await _store_uploads(files, _who(request, uploaded_by), rn, "mobile")
 
 
 @app.get("/api/repairs/{repair_no}/photos")

@@ -121,9 +121,14 @@ fields + saved_at / saved_by), `revision_photo` (order, description,
 rotation), `photo_annotation` (symbol, x, y, size, colour per markup), `photo_file`
 (JPEG bytes).
 
-`saved_by` records the client address for now; switch it to the login name
-once the app sits behind authentication (the `X-Forwarded-User` header is
-honoured if a proxy supplies it).
+**Who did it.** There is no login. Phones have no domain user, so the phone
+page asks the technician to pick their name once (remembered on the device)
+and sends it with every upload; the desktop form uses its Technician
+drop-down. Both are recorded as `NAME @client-address` in `uploaded_by` /
+`saved_by`, so a self-declared name is still traceable. If the app is later
+put behind an authenticating proxy, the `X-Forwarded-User` header takes
+precedence automatically. Microsoft Entra sign-in is the upgrade path if real
+identity on phones is needed.
 
 ### Links
 
