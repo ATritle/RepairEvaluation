@@ -91,6 +91,8 @@ def _check_repair_no(repair_no: str) -> str:
 
 
 def _forge_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, photo_store.PhotoLocationError):
+        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, forge.NotFound):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, forge.ForgeUnavailable):
@@ -228,10 +230,16 @@ async def api_delete_evaluation(repair_no: str) -> JSONResponse:
 # --------------------------------------------------------------------------
 # Photos (bytes in Forge, cached on local disk)
 # --------------------------------------------------------------------------
-async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no: Optional[str],
+async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no: str,
                          source: str) -> list[UploadedPhoto]:
-    """Normalise each upload, store it in Forge and, when a repair number is
-    given, register it in that repair's photo library."""
+    """Normalise each upload, file it in the repair's drawing folder (or Forge),
+    and register it in that repair's photo library. The folder must exist, so
+    check once before touching any file - a missing folder fails the whole batch."""
+    if get_settings().photo_store == "fs":
+        try:
+            await photo_store.photos_dir_for(repair_no)
+        except photo_store.PhotoLocationError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     uploaded: list[UploadedPhoto] = []
     for f in files:
         ext = Path(f.filename or "").suffix.lower()
@@ -244,9 +252,8 @@ async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no:
             raise HTTPException(status_code=400, detail=f"Unable to read {f.filename}: {exc}") from exc
         display = clean_text(Path(f.filename or name).name, 260) or name
         try:
-            await photo_store.put(name, display, jpeg, w, h, who)
-            if repair_no:
-                await forge.library_add(repair_no, name, display, source, who)
+            await photo_store.put(name, display, jpeg, w, h, who, repair_no)
+            await forge.library_add(repair_no, name, display, source, who)
         except Exception as exc:
             raise _forge_error(exc) from exc
         uploaded.append(UploadedPhoto(file=name, name=display))
@@ -257,9 +264,10 @@ async def _store_uploads(files: list[UploadFile], who: Optional[str], repair_no:
 async def api_upload_photos(
     request: Request, files: list[UploadFile] = File(...), repair_no: str = Form(""), uploaded_by: str = Form("")
 ) -> list[UploadedPhoto]:
-    """Desktop upload. If the form already has a Repair #, the photos also land in its library."""
-    rn = _check_repair_no(repair_no) if repair_no.strip() else None
-    return await _store_uploads(files, _who(request, uploaded_by), rn, "web")
+    """Desktop upload. Photos are filed under the Repair #'s drawing folder, so it is required."""
+    if not repair_no.strip():
+        raise HTTPException(status_code=400, detail="Enter the Repair # before adding photos")
+    return await _store_uploads(files, _who(request, uploaded_by), _check_repair_no(repair_no), "web")
 
 
 # --------------------------------------------------------------------------
@@ -275,6 +283,19 @@ async def api_mobile_upload(
     if not clean_text(uploaded_by, 100):
         raise HTTPException(status_code=400, detail="Pick who you are before uploading")
     return await _store_uploads(files, _who(request, uploaded_by), rn, "mobile")
+
+
+@app.get("/api/repairs/{repair_no}/folder")
+async def api_repair_folder(repair_no: str) -> dict:
+    """Where photos for this repair will be filed, and whether that folder exists yet."""
+    rn = _check_repair_no(repair_no)
+    if get_settings().photo_store != "fs":
+        return {"ok": True, "repair_no": rn, "location": "Forge database"}
+    try:
+        p = await photo_store.photos_dir_for(rn)
+        return {"ok": True, "repair_no": rn, "location": str(p)}
+    except photo_store.PhotoLocationError as exc:
+        return {"ok": False, "repair_no": rn, "reason": str(exc)}
 
 
 @app.get("/api/repairs/{repair_no}/photos")

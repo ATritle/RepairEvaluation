@@ -478,6 +478,11 @@
 
   async function uploadPhotos(files) {
     if (!files.length) return;
+    if (!$("#f-repair_no").value.trim()) {
+      toast("Enter the Repair # first — photos are filed in its drawing folder", true);
+      $("#f-repair_no").focus();
+      return;
+    }
     const fd = new FormData();
     const rn = $("#f-repair_no").value.trim();
     if (rn) fd.append("repair_no", rn);   // also files the photos in this repair's library
@@ -848,8 +853,15 @@
   async function refreshLibraryCount() {
     const rn = currentRepairNo();
     const badge = $("#library-count");
+    const hint = $("#folder-hint");
     $("#mobile-link").href = rn ? `/mobile/${encodeURIComponent(rn)}` : "/mobile";
-    if (!rn) { badge.hidden = true; return; }
+    if (!rn) { badge.hidden = true; hint.textContent = ""; hint.className = "muted"; return; }
+    api(`/api/repairs/${encodeURIComponent(rn)}/folder`).then((r) => r.json()).then((f) => {
+      if (rn !== currentRepairNo()) return;
+      hint.textContent = f.ok ? `Photos file to ${f.location}` : `⚠ ${f.reason}`;
+      hint.className = f.ok ? "muted folder-ok" : "folder-bad";
+      hint.title = hint.textContent;
+    }).catch(() => { hint.textContent = ""; });
     try {
       const items = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();
       const onReport = new Set(state.photos.map((p) => p.file));

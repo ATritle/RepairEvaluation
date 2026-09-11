@@ -47,13 +47,14 @@
   });
 
   function updateButtons() {
-    const ok = REPAIR_RE.test(current) && !!tech.value;
+    const ok = REPAIR_RE.test(current) && !!tech.value && folderOk;
     camBtn.disabled = galBtn.disabled = !ok;
   }
 
   function setRepair(v) {
     current = (v || "").trim().toUpperCase();
     const ok = REPAIR_RE.test(current);
+    folderOk = false;            // until the folder check for this number comes back
     updateButtons();
     syncUrl();
     if (!current) { status.textContent = "Enter the repair number first."; grid.innerHTML = ""; empty.hidden = true; return; }
@@ -62,14 +63,24 @@
     loadLibrary();
   }
 
+  let folderOk = true;
+
   async function loadLibrary() {
     const rn = current;
     try {
-      const res = await fetch(`/api/repairs/${encodeURIComponent(rn)}/photos`);
+      const [res, fres] = await Promise.all([
+        fetch(`/api/repairs/${encodeURIComponent(rn)}/photos`),
+        fetch(`/api/repairs/${encodeURIComponent(rn)}/folder`),
+      ]);
       if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
       const items = await res.json();
+      const folder = fres.ok ? await fres.json() : { ok: false, reason: "folder check failed" };
       if (rn !== current) return;
-      status.innerHTML = `<b>${esc(rn)}</b> · ${items.length} photo${items.length === 1 ? "" : "s"} in library`;
+      folderOk = !!folder.ok;
+      updateButtons();
+      status.innerHTML = `<b>${esc(rn)}</b> · ${items.length} photo${items.length === 1 ? "" : "s"} in library` +
+        (folder.ok ? `<br><span class="muted">Files to ${esc(folder.location)}</span>`
+                   : `<br><span class="err">⚠ ${esc(folder.reason)}</span>`);
       grid.innerHTML = "";
       empty.hidden = items.length > 0;
       for (const it of items) {

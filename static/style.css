@@ -110,6 +110,10 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.8); cur
 .color-select, #zoom-color { min-width: 110px; font-weight: bold; }
 .muted { color: var(--muted); }
 
+/* ---------- Photo folder hint ---------- */
+.folder-hint { font-size: 12px; margin: -4px 0 10px; min-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folder-hint.folder-bad { color: #ff8a8a; }
+
 /* ---------- Photo library ---------- */
 .photo-toolbar .btn-row .btn { flex: none; }
 a.btn { text-decoration: none; display: inline-flex; align-items: center; }

@@ -86,7 +86,7 @@ FORGE_USER=<login with read/write on Forge.RepairEval>
 FORGE_PASSWORD=<password>
 
 PHOTO_STORE=fs                    # fs = files under PHOTO_FS_ROOT, db = VARBINARY in Forge
-PHOTO_FS_ROOT=\\eha-serv.ifp.eha\data\Apps\RepairEval\photos   # the N drive (N:\Apps\RepairEval\photos)
+PHOTO_FS_ROOT=\\eha-serv.ifp.eha\data\Dwgs   # the drawings root on the N drive (N:\Dwgs)
 ```
 
 All P21 queries are SELECT-only with `WITH (NOLOCK)`, run through a read-only
@@ -108,13 +108,20 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
   revision creates a new latest revision from that version.
 - Photo **metadata** is always in Forge (`RepairEval.photo_file`, shared across
   revisions by file name). Photo **bytes** go where `PHOTO_STORE` says:
-  `fs` (default) writes files under `PHOTO_FS_ROOT/<yyyy>/<mm>/<file>.jpg`,
-  which is the N drive: `\\eha-serv.ifp.eha\data\Apps\RepairEval\photos`
-  (`N:\Apps\RepairEval\photos`). Use the UNC path, not the drive letter, so a
-  service account can reach it. `db` keeps bytes as VARBINARY in the same row.
-  Each row records which, so both can coexist; `scripts/migrate_photos.py`
-  moves existing photos to the configured root. `data/photos/` is only a local
-  cache used by the PDF builder.
+  `fs` (default) files each photo in the **repair's drawing folder on the N
+  drive**: `N:\Dwgs\R36000\R36169\Photos\<file>.jpg`, i.e. the series folder
+  (R-number rounded down to the thousand), the numbered job folder, and a
+  `Photos` sub-folder. The series and job folders must already exist (they
+  come from the drawing/job process); the app creates only `Photos`. If the
+  repair number is not an R-number, or its folder is missing, the upload is
+  refused with a clear message, and both pages show where photos will go (or
+  why they can't) as soon as a Repair # is entered. `PHOTO_FS_ROOT` is the
+  Dwgs share as a UNC path, not the `N:` letter, so a service account can
+  reach it. `db` keeps bytes as VARBINARY in the row instead. Each row records
+  which, and a row may carry an absolute path (photos migrated from earlier
+  layouts); `scripts/migrate_photos.py` moves photos into their drawing
+  folders where those exist. `data/photos/` is only a local cache used by the
+  PDF builder.
 
 Tables: `evaluation` (repair number, current revision), `revision` (all form
 fields + saved_at / saved_by), `revision_photo` (order, description,
