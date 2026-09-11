@@ -174,6 +174,14 @@ Endpoints: `POST /api/mobile/photos` (form: `repair_no`, `files[]`),
 `GET /api/repairs/{repair_no}/photos`, `DELETE /api/repairs/{repair_no}/photos/{file}`,
 `GET /api/repairs/recent`.
 
+### Testing photo storage safely
+
+Never point a test at the live `Dwgs` share: every job folder there is real,
+including ones that look unused. For local testing set
+`PHOTO_FS_ROOT=data/test_dwgs` in `.env` (a sandbox tree with `R90000/R90001`
+and `R90002`, gitignored) and use repair numbers in that range, or mock
+`photo_store.fs_root` to a temp directory as the unit check in the history does.
+
 ### Input hardening
 
 All SQL is parameterised (pyodbc `?` placeholders); table names come from
