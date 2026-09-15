@@ -777,7 +777,7 @@
   }
 
   async function searchRepairs() {
-    const q = repairInput.value.trim();
+    const q = normalizeRepairNo(repairInput.value);   // "36169" searches as R36169
     if (q.length < 1) { hideRepairSuggestions(); repairHint.textContent = ""; return; }
     const seq = ++repairSeq;
     try {
