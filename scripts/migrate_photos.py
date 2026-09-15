@@ -1,21 +1,20 @@
-"""Move photo bytes into the repair drawing folders on the N drive.
+"""Move saved revisions onto folder-first photo references (one-off, 2026-09).
 
-For every photo_file row:
-  * find its repair number (library row, else the evaluation that uses it)
-  * if <root>\\R36000\\R36169 exists: write/copy the file into its Photos folder
-    and set storage='fs', path='R36000/R36169/Photos/<file>'
-  * otherwise (non R-number, or job folder missing): if the bytes are still in
-    Forge, or the file sits under --legacy-root, leave it there and record an
-    absolute path so it still serves. Reported so someone can create the folder
-    and re-run.
+For every revision_photo row still using the legacy photo_file link:
+  * find the bytes (photo_file.path, absolute or relative to the old root, or
+    the VARBINARY column)
+  * normalise, hash, copy into <Dwgs>\\R36000\\R36169\\Photos\\.archive\\<sha>.jpg
+  * set sha256 / archive_path / source_name on the row
+Revisions whose repair has no drawing folder cannot be archived; the script
+reports them. Test evaluations (RTEST-*, R123456) are removed with --drop-tests.
+Legacy tables are dropped only with --drop-legacy, and only if nothing still
+depends on them.
 
-Safe to re-run. Nothing is deleted from the old location.
-
-    .venv\\Scripts\\python scripts\\migrate_photos.py --legacy-root "\\\\eha-serv.ifp.eha\\data\\Apps\\RepairEval\\photos" --legacy-root data\\photo_store
+    .venv\\Scripts\\python scripts\\migrate_photos.py --dry-run
+    .venv\\Scripts\\python scripts\\migrate_photos.py --drop-tests --drop-legacy
 """
 import argparse
 import hashlib
-import shutil
 import sys
 from pathlib import Path
 
@@ -23,91 +22,86 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pyodbc  # noqa: E402
 
-from app.photo_store import PhotoLocationError, _resolve_photos_dir_sync, fs_root  # noqa: E402
+from app.images import normalize_image_bytes  # noqa: E402
+from app.photos import PhotoLocationError, archive_file, fs_root, rel_to_root  # noqa: E402
 from app.settings import get_settings  # noqa: E402
+
+LEGACY_ROOT = Path(r"\\eha-serv.ifp.eha\data\Apps\RepairEval\photos")
+TEST_PATTERNS = ("RTEST-%", "R123456")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--legacy-root", action="append", default=[], help="previous photo root(s) to look in")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--drop-tests", action="store_true", help="delete RTEST-* and R123456 evaluations outright")
+    ap.add_argument("--drop-legacy", action="store_true", help="drop repair_photo and photo_file when no row needs them")
     args = ap.parse_args()
 
     st = get_settings()
     s = st.forge_schema
-    root = fs_root()
-    legacy = [Path(r) for r in args.legacy_root]
-    print(f"target root: {root}")
-
     cn = pyodbc.connect(st.forge_connection_string)
     cur = cn.cursor()
-    cur.execute(f"""
-        SELECT pf.file_name, pf.storage, pf.path, pf.sha256, pf.content,
-               COALESCE(
-                 (SELECT TOP 1 rp.repair_no FROM {s}.repair_photo rp WITH (NOLOCK) WHERE rp.file_name = pf.file_name ORDER BY rp.removed_at DESC, rp.uploaded_at DESC),
-                 (SELECT TOP 1 e.repair_no FROM {s}.revision_photo vp WITH (NOLOCK)
-                    JOIN {s}.revision r WITH (NOLOCK) ON r.revision_id = vp.revision_id
-                    JOIN {s}.evaluation e WITH (NOLOCK) ON e.evaluation_id = r.evaluation_id
-                   WHERE vp.file_name = pf.file_name ORDER BY r.saved_at DESC)
-               ) AS repair_no
-        FROM {s}.photo_file pf WITH (NOLOCK)""")
-    rows = cur.fetchall()
-    placed = kept = already = orphan = 0
 
-    for file_name, storage, path, sha, content, repair_no in rows:
-        storage = (storage or "db").strip()
-        # current bytes: from Forge, or from wherever the row / legacy roots say
-        src: Path | None = None
-        if storage == "fs" and path:
-            cand = Path(path) if Path(path).is_absolute() else root / path
-            if cand.exists():
-                src = cand
-            else:
-                for lr in legacy:
-                    if (lr / path).exists():
-                        src = lr / path
-                        break
-        data = bytes(content) if content is not None else (src.read_bytes() if src else None)
-        if data is None:
-            print(f"  !! {file_name}: bytes not found anywhere (repair {repair_no})"); orphan += 1; continue
-
-        try:
-            if not repair_no:
-                raise PhotoLocationError("no repair number references this photo")
-            photos_dir = _resolve_photos_dir_sync(repair_no, create=not args.dry_run)
-        except PhotoLocationError as exc:
-            # leave where it is, but make the row self-sufficient (absolute path)
-            if src and not (storage == "fs" and Path(path or "").is_absolute()):
+    if args.drop_tests:
+        for pat in TEST_PATTERNS:
+            cur.execute(f"SELECT repair_no FROM {s}.evaluation WHERE repair_no LIKE ?", [pat])
+            for (rn,) in cur.fetchall():
+                print(f"  drop test evaluation {rn}")
                 if not args.dry_run:
-                    cur.execute(f"UPDATE {s}.photo_file SET storage='fs', path=?, content=NULL WHERE file_name=?",
-                                [str(src.resolve()), file_name])
-                print(f"  kept      {file_name} at {src}  ({exc})")
-            else:
-                print(f"  kept      {file_name} ({'in Forge' if storage == 'db' else src})  ({exc})")
-            kept += 1
-            continue
+                    cur.execute(f"DELETE FROM {s}.evaluation WHERE repair_no = ?", [rn])   # cascades revisions/photos
+            if not args.dry_run:
+                cur.execute(f"DELETE FROM {s}.repair_photo WHERE repair_no LIKE ?", [pat])
 
-        target = photos_dir / file_name
-        rel = str(target.relative_to(root)).replace("\\", "/")
-        if target.exists() and path == rel:
-            already += 1
-            continue
+    cur.execute(f"""
+        SELECT vp.revision_photo_id, e.repair_no, vp.file_name, vp.display_name, pf.storage, pf.path, pf.content
+        FROM {s}.revision_photo vp
+        JOIN {s}.revision r ON r.revision_id = vp.revision_id
+        JOIN {s}.evaluation e ON e.evaluation_id = r.evaluation_id
+        LEFT JOIN {s}.photo_file pf ON pf.file_name = vp.file_name
+        WHERE vp.sha256 IS NULL""")
+    rows = cur.fetchall()
+    done = skipped = 0
+    for rp_id, repair_no, file_name, display_name, storage, path, content in rows:
+        data = None
+        if content is not None:
+            data = bytes(content)
+        elif path:
+            for cand in (Path(path), fs_root() / path, LEGACY_ROOT / path):
+                if cand.exists():
+                    data = cand.read_bytes()
+                    break
+        if data is None:
+            print(f"  !! {repair_no}: bytes for {file_name} not found; row left as is"); skipped += 1; continue
+        try:
+            jpeg, _w, _h = normalize_image_bytes(data)
+            sha = hashlib.sha256(jpeg).hexdigest()
+            target = archive_file(repair_no, sha, create_dir=not args.dry_run)
+        except PhotoLocationError as exc:
+            print(f"  !! {repair_no}: {exc}; row left as is"); skipped += 1; continue
         if not args.dry_run:
             if not target.exists():
-                if src:
-                    shutil.copy2(src, target)
-                else:
-                    tmp = target.with_suffix(".jpg.part"); tmp.write_bytes(data); tmp.replace(target)
-            if sha and hashlib.sha256(target.read_bytes()).hexdigest() != sha:
-                print(f"  !! {file_name}: sha mismatch after copy, row left unchanged"); orphan += 1; continue
-            cur.execute(f"UPDATE {s}.photo_file SET storage='fs', path=?, content=NULL WHERE file_name=?", [rel, file_name])
-        placed += 1
-        print(f"  -> {rel}")
+                tmp = target.with_suffix(".jpg.part"); tmp.write_bytes(jpeg); tmp.replace(target)
+            cur.execute(
+                f"UPDATE {s}.revision_photo SET sha256 = ?, archive_path = ?, source_name = COALESCE(source_name, ?) WHERE revision_photo_id = ?",
+                [sha, rel_to_root(target), display_name, rp_id],
+            )
+        done += 1
+        print(f"  {repair_no}: {display_name or file_name} -> .archive/{sha[:12]}…")
+
+    if args.drop_legacy:
+        cur.execute(f"SELECT COUNT(*) FROM {s}.revision_photo WHERE sha256 IS NULL")
+        pending = cur.fetchone()[0]
+        if pending:
+            print(f"  not dropping legacy tables: {pending} revision photo(s) still unmigrated")
+        elif not args.dry_run:
+            cur.execute(f"IF OBJECT_ID('{s}.repair_photo', 'U') IS NOT NULL DROP TABLE {s}.repair_photo")
+            cur.execute(f"IF OBJECT_ID('{s}.photo_file', 'U') IS NOT NULL DROP TABLE {s}.photo_file")
+            cur.execute(f"IF COL_LENGTH('{s}.revision_photo', 'file_name') IS NOT NULL ALTER TABLE {s}.revision_photo DROP COLUMN file_name")
+            print("  dropped repair_photo, photo_file and revision_photo.file_name")
 
     if not args.dry_run:
         cn.commit()
-    print(f"\ndone: {placed} placed in drawing folders, {already} already there, {kept} kept where they were, {orphan} problems"
-          + (" (dry run)" if args.dry_run else ""))
+    print(f"\ndone: {done} archived, {skipped} skipped" + (" (dry run)" if args.dry_run else ""))
 
 
 if __name__ == "__main__":

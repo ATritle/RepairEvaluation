@@ -23,6 +23,9 @@
   .m-status b { color: var(--cyan); }
   .m-status .muted { font-size: 12px; word-break: break-all; }
   .m-status .err { color: #ff8a8a; }
+  .m-queue { font-size: 13px; margin: -4px 0 12px; }
+  .m-queue .err { color: #ff8a8a; }
+  .m-queue .link-btn { background: transparent; border: 0; color: var(--orange); font: inherit; font-weight: bold; text-decoration: underline; cursor: pointer; }
   .m-whoami { font-size: 13px; margin: -6px 0 12px; }
   .m-whoami b { color: var(--cyan); }
   .m-whoami a { color: var(--orange); }
@@ -75,6 +78,7 @@
     <input type="file" id="gal" accept="image/*" multiple hidden>
   </div>
   <div class="m-progress" id="progress" hidden><div id="bar"></div></div>
+  <div class="m-queue" id="queue" hidden></div>
 
   <div class="m-grid" id="grid"></div>
   <div class="m-empty" id="empty" hidden>No photos yet for this repair.</div>

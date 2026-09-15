@@ -176,17 +176,32 @@
     }
   }
 
+  // ------------------------------------------------------------ photo URLs
+  // A photo ref is "live:<file name>" (a file in the repair's Photos folder) or
+  // "archive:<sha256>" (a frozen snapshot behind a saved revision).
+  function photoRepairNo() {
+    return ($("#f-repair_no").value.trim() || state.repairNo || "").toUpperCase();
+  }
+  function photoUrl(ref, thumb = false, repairNo = photoRepairNo()) {
+    const i = ref.indexOf(":");
+    const kind = ref.slice(0, i), val = ref.slice(i + 1);
+    const base = kind === "archive"
+      ? `/repairs/${encodeURIComponent(repairNo)}/archive/${val}`
+      : `/repairs/${encodeURIComponent(repairNo)}/photos/${encodeURIComponent(val)}`;
+    return thumb ? `${base}?thumb=1` : base;
+  }
+
   // ------------------------------------------------------------ PhotoCanvas
   const imageCache = new Map();
-  function loadImage(file) {
-    if (imageCache.has(file)) return imageCache.get(file);
+  function loadImage(url) {
+    if (imageCache.has(url)) return imageCache.get(url);
     const p = new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Unable to load image"));
-      img.src = `/photos/${encodeURIComponent(file)}`;
+      img.onerror = () => { imageCache.delete(url); reject(new Error("Unable to load image")); };
+      img.src = url;
     });
-    imageCache.set(file, p);
+    imageCache.set(url, p);
     return p;
   }
 
@@ -207,7 +222,7 @@
 
       photo.annotations = photo.annotations || [];
 
-      loadImage(photo.file)
+      loadImage(photoUrl(photo.ref))
         .then((img) => { this.img = img; this.draw(); })
         .catch(() => { this.failed = true; this.draw(); });
 
@@ -369,7 +384,7 @@
 
       this.titleEl = $(".photo-title", this.el);
       this.titleEl.textContent = `PHOTO ${index + 1}`;
-      $(".file-name", this.el).textContent = photo.name || photo.file;
+      $(".file-name", this.el).textContent = photo.name || photo.ref;
 
       this.symbolSelect = $(".symbol-select", this.el);
       fillSymbolSelect(this.symbolSelect);
@@ -486,14 +501,13 @@
     const fd = new FormData();
     const rn = $("#f-repair_no").value.trim();
     if (rn) fd.append("repair_no", rn);   // also files the photos in this repair's library
-    fd.append("uploaded_by", $("#f-technician").value || "");
     for (const f of files) fd.append("files", f, f.name);
     setStatus(`Uploading ${files.length} photo${files.length === 1 ? "" : "s"}…`);
     try {
       const res = await api("/api/photos", { method: "POST", body: fd });
       const uploaded = await res.json();
       for (const u of uploaded) {
-        state.photos.push({ file: u.file, name: u.name, description: "", rotation: 0, annotations: [] });
+        state.photos.push({ ref: u.ref, name: u.name, description: "", rotation: 0, annotations: [] });
       }
       renderPhotos();
       markDirty();
@@ -516,8 +530,10 @@
     data.customer_id = state.customerId;
     data.contact_id = state.contactId;
     data.email_override = state.emailOverride;
+    data.base_revision_no = state.currentRevisionNo || 0;
+    data.force = false;
     data.photos = state.photos.map((p) => ({
-      file: p.file,
+      ref: p.ref,
       name: p.name || "",
       description: p.description || "",
       rotation: p.rotation || 0,
@@ -550,7 +566,7 @@
     if (!$("#f-date").value) $("#f-date").value = todayIso();
     restoreP21Link(data);
     state.photos = (data.photos || []).map((p) => ({
-      file: p.file,
+      ref: p.ref,
       name: p.name || "",
       description: p.description || "",
       rotation: p.rotation || 0,
@@ -588,18 +604,32 @@
     }
     setStatus("Saving…");
     try {
-      const res = await api("/api/evaluations", {
+      let res = await fetch("/api/evaluations", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
       });
+      if (res.status === 409) {
+        const detail = (await res.json()).detail;
+        if (detail && detail.stale) {
+          const ok = await confirmDialog(
+            "Someone else saved this evaluation",
+            `${detail.message} Saving now creates revision ${detail.current_revision_no + 1} from what is on your screen; their revision ${detail.current_revision_no} stays in the history. Save anyway?`,
+          );
+          if (!ok) { setStatus("Save cancelled — use History to see the newer revision"); return; }
+          data.force = true;
+          res = await fetch("/api/evaluations", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+          });
+        } else {
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+      }
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = typeof j.detail === "string" ? j.detail : (j.detail && j.detail.message) || JSON.stringify(j.detail); } catch (_) { /* ignore */ }
+        throw new Error(detail);
+      }
       const saved = await res.json();
-      state.repairNo = saved.repair_no;
-      state.revisionNo = saved.revision_no;
-      state.currentRevisionNo = saved.current_revision_no;
-      state.savedAt = saved.saved_at;
-      state.savedBy = saved.saved_by;
-      clearDirty();
-      updateRevisionBanner();
-      syncUrl();
+      loadData(saved);   // photos now reference frozen snapshots; banner and URL follow
       setStatus(`Saved ${saved.repair_no} revision ${saved.revision_no} at ${new Date().toLocaleTimeString()}`);
       toast(`Saved ${saved.repair_no} as revision ${saved.revision_no}`);
     } catch (err) {
@@ -637,33 +667,44 @@
     const tbody = $("#report-list");
     tbody.innerHTML = "<tr><td colspan='8' class='muted'>Loading…</td></tr>";
     try {
-      const list = await (await api("/api/evaluations")).json();
+      const showDeleted = $("#show-deleted").checked;
+      const list = (await (await api(`/api/evaluations?include_deleted=${showDeleted ? 1 : 0}`)).json())
+        .filter((r) => showDeleted || !r.deleted_at);
       tbody.innerHTML = "";
       $("#report-empty").hidden = list.length > 0;
       for (const r of list) {
         const tr = document.createElement("tr");
+        const deleted = !!r.deleted_at;
+        if (deleted) tr.classList.add("deleted");
         tr.innerHTML = `
-          <td><b>${esc(r.repair_no)}</b></td>
+          <td><b>${esc(r.repair_no)}</b>${deleted ? " <span class='pill'>deleted</span>" : ""}</td>
           <td>${esc(r.customer)}</td>
           <td>${esc(r.date)}</td>
           <td>${esc(r.technician)}</td>
           <td class="num">${r.photo_count}</td>
           <td class="num">${r.revision_count}</td>
-          <td class="muted">${esc(fmtWhen(r.updated_at))}${r.saved_by ? " · " + esc(r.saved_by) : ""}</td>
-          <td><button class="btn small danger" title="Delete every revision of this evaluation">Delete</button></td>`;
+          <td class="muted">${deleted ? "deleted " + esc(fmtWhen(r.deleted_at)) + (r.deleted_by ? " · " + esc(r.deleted_by) : "")
+                                        : esc(fmtWhen(r.updated_at)) + (r.saved_by ? " · " + esc(r.saved_by) : "")}</td>
+          <td>${deleted ? `<button class="btn small" title="Bring it back">Restore</button>`
+                        : `<button class="btn small danger" title="Hide this evaluation (all revisions are kept and it can be restored)">Delete</button>`}</td>`;
         tr.addEventListener("click", () => loadReport(r.repair_no, null, m));
         $("button", tr).addEventListener("click", async (e) => {
           e.stopPropagation();
-          const ok = await confirmDialog(
-            `Delete ${r.repair_no}?`,
-            `This removes all ${r.revision_count} revision${r.revision_count === 1 ? "" : "s"} of ${r.repair_no} from Forge. It cannot be undone.`,
-          );
-          if (!ok) return;
           try {
-            await api(`/api/evaluations/${encodeURIComponent(r.repair_no)}`, { method: "DELETE" });
-            if (state.repairNo === r.repair_no) { state.repairNo = null; state.revisionNo = null; state.currentRevisionNo = null; updateRevisionBanner(); }
+            if (deleted) {
+              await api(`/api/evaluations/${encodeURIComponent(r.repair_no)}/restore`, { method: "POST" });
+              toast(`${r.repair_no} restored`);
+            } else {
+              const ok = await confirmDialog(
+                `Delete ${r.repair_no}?`,
+                `${r.repair_no} disappears from the list and lookups. All ${r.revision_count} revision${r.revision_count === 1 ? "" : "s"} are kept and it can be restored from "Show deleted".`,
+              );
+              if (!ok) return;
+              await api(`/api/evaluations/${encodeURIComponent(r.repair_no)}`, { method: "DELETE" });
+              if (state.repairNo === r.repair_no) { state.repairNo = null; state.revisionNo = null; state.currentRevisionNo = null; updateRevisionBanner(); }
+            }
             openReportDialog();
-          } catch (err) { toast(`Delete failed: ${err.message}`, true); }
+          } catch (err) { toast(`${deleted ? "Restore" : "Delete"} failed: ${err.message}`, true); }
         });
         tbody.appendChild(tr);
       }
@@ -864,8 +905,7 @@
     }).catch(() => { hint.textContent = ""; });
     try {
       const items = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();
-      const onReport = new Set(state.photos.map((p) => p.file));
-      const fresh = items.filter((i) => !onReport.has(i.file)).length;
+      const fresh = items.filter((i) => !onReportItem(i)).length;
       badge.textContent = fresh ? `${fresh} new` : String(items.length);
       badge.hidden = items.length === 0;
     } catch (_) {
@@ -873,37 +913,41 @@
     }
   }
 
+  /** Is this folder photo already on the report in the form? (same file, or same content as a frozen snapshot) */
+  function onReportItem(it) {
+    return state.photos.some((p) => p.ref === it.ref || (it.sha256 && p.ref === `archive:${it.sha256}`));
+  }
+
   function renderLibrary() {
     const grid = $("#library-grid");
     grid.innerHTML = "";
-    const onReport = new Set(state.photos.map((p) => p.file));
+    const rn = currentRepairNo();
     for (const it of libraryItems) {
-      const used = onReport.has(it.file);
+      const used = onReportItem(it);
       const fig = document.createElement("figure");
       fig.classList.toggle("on-report", used);
-      fig.classList.toggle("selected", librarySelected.has(it.file));
+      fig.classList.toggle("selected", librarySelected.has(it.ref));
       fig.innerHTML =
-        `<img src="/photos/${encodeURIComponent(it.file)}?thumb=1" alt="" loading="lazy">` +
-        (used ? `<span class="flag">on report</span>` : (it.source === "mobile" ? `<span class="flag">📱 phone</span>` : "")) +
+        `<img src="${photoUrl(it.ref, true, rn)}" alt="" loading="lazy">` +
+        (used ? `<span class="flag">on report</span>` : (it.in_latest ? `<span class="flag">on saved report</span>` : "")) +
         `<span class="tick">✓</span>` +
-        `<button class="rm" title="Remove from library">✕</button>` +
-        `<figcaption>${esc(fmtWhen(it.uploaded_at))}${it.uploaded_by ? " · " + esc(it.uploaded_by) : ""}${it.name ? " · " + esc(it.name) : ""}</figcaption>`;
+        `<button class="rm" title="Remove from the Photos folder (moved to .removed)">✕</button>` +
+        `<figcaption>${esc(it.name)} · ${esc(fmtWhen(it.modified))} · ${Math.round(it.size / 1024)} KB</figcaption>`;
       if (!used) {
         fig.addEventListener("click", (e) => {
           if (e.target.classList.contains("rm")) return;
-          if (librarySelected.has(it.file)) librarySelected.delete(it.file); else librarySelected.add(it.file);
+          if (librarySelected.has(it.ref)) librarySelected.delete(it.ref); else librarySelected.add(it.ref);
           renderLibrary();
         });
       }
       $(".rm", fig).addEventListener("click", async (e) => {
         e.stopPropagation();
-        const ok = await confirmDialog("Remove from library?",
-          used ? "This photo is on the current report. It will be removed from the library only; the report keeps it."
-               : "Remove this photo from the repair's library? Saved revisions that already use it are not affected.");
+        const ok = await confirmDialog("Remove from the Photos folder?",
+          `${it.name} is moved into the folder's .removed sub-folder, so it can be recovered. Saved revisions keep their own frozen copies.`);
         if (!ok) return;
         try {
-          await api(`/api/repairs/${encodeURIComponent(currentRepairNo())}/photos/${encodeURIComponent(it.file)}`, { method: "DELETE" });
-          librarySelected.delete(it.file);
+          await api(`/api/repairs/${encodeURIComponent(rn)}/photos/${encodeURIComponent(it.name)}`, { method: "DELETE" });
+          librarySelected.delete(it.ref);
           await loadLibrary();
         } catch (err) { toast(`Remove failed: ${err.message}`, true); }
       });
@@ -919,14 +963,12 @@
     $("#library-title").textContent = `Photo Library — ${rn}`;
     try {
       libraryItems = await (await api(`/api/repairs/${encodeURIComponent(rn)}/photos`)).json();
-      const fromPhone = libraryItems.filter((i) => i.source === "mobile").length;
-      $("#library-sub").textContent = `${libraryItems.length} photo${libraryItems.length === 1 ? "" : "s"}` +
-        (fromPhone ? ` · ${fromPhone} from phone` : "") + ` · click to select, then add to the report`;
+      $("#library-sub").textContent = `${libraryItems.length} photo${libraryItems.length === 1 ? "" : "s"} in the Photos folder · click to select, then add to the report`;
     } catch (err) {
       libraryItems = [];
       $("#library-sub").textContent = `Unable to load library: ${err.message}`;
     }
-    for (const f of Array.from(librarySelected)) if (!libraryItems.some((i) => i.file === f)) librarySelected.delete(f);
+    for (const f of Array.from(librarySelected)) if (!libraryItems.some((i) => i.ref === f)) librarySelected.delete(f);
     renderLibrary();
     refreshLibraryCount();
   }
@@ -939,11 +981,10 @@
   }
 
   function addSelectedFromLibrary() {
-    const onReport = new Set(state.photos.map((p) => p.file));
     let added = 0;
     for (const it of libraryItems) {
-      if (!librarySelected.has(it.file) || onReport.has(it.file)) continue;
-      state.photos.push({ file: it.file, name: it.name || it.file, description: it.caption || "", rotation: 0, annotations: [] });
+      if (!librarySelected.has(it.ref) || onReportItem(it)) continue;
+      state.photos.push({ ref: it.ref, name: it.name, description: "", rotation: 0, annotations: [] });
       added++;
     }
     librarySelected.clear();
@@ -956,10 +997,10 @@
   $("#library-refresh").addEventListener("click", loadLibrary);
   $("#library-add").addEventListener("click", addSelectedFromLibrary);
   $("#library-select-new").addEventListener("click", () => {
-    const onReport = new Set(state.photos.map((p) => p.file));
-    for (const it of libraryItems) if (!onReport.has(it.file)) librarySelected.add(it.file);
+    for (const it of libraryItems) if (!onReportItem(it)) librarySelected.add(it.ref);
     renderLibrary();
   });
+  $("#show-deleted").addEventListener("change", openReportDialog);
   repairInput.addEventListener("change", () => {
     const up = repairInput.value.trim().toUpperCase();
     if (repairInput.value !== up) { repairInput.value = up; updateRevisionBanner(); }

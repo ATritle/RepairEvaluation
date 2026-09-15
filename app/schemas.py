@@ -1,11 +1,10 @@
 """Pydantic models = the input boundary. Everything the browser sends passes
-through here before it reaches SQL or ReportLab:
+through here before it reaches SQL, the file share or ReportLab:
 
 - free text is scrubbed (control characters removed, whitespace trimmed,
   CRLF normalised) and length-capped to the Forge column sizes
-- photo file names must match the server-generated <32 hex>.jpg pattern
-- P21 ids must be plain digits
-- enumerations (symbol, rotation) are validated
+- photo references must be 'live:<file name>' or 'archive:<sha256>'
+- P21 ids must be plain digits; enumerations (symbol, colour, rotation) validated
 
 SQL itself is always parameterised (pyodbc '?' placeholders); nothing here
 is ever concatenated into a statement.
@@ -15,9 +14,10 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-PHOTO_FILE_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
 from .config import COLORS as _COLORS
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+PHOTO_REF_RE = re.compile(r"^(live:[^\\/:*?\"<>|\x00-\x1f]{1,200}|archive:[0-9a-f]{64})$")
 COLOR_VALUES = {c["value"] for c in _COLORS}
 SYMBOLS = {"arrow_up", "arrow_right", "arrow_down", "arrow_left", "circle", "square", "rectangle", "x", "check"}
 
@@ -71,17 +71,22 @@ class Annotation(BaseModel):
 
 
 class Photo(BaseModel):
-    file: str
+    """A photo on a report. `ref` is 'live:<name>' while editing (a file in the
+    repair's Photos folder) and 'archive:<sha256>' once saved (a frozen snapshot).
+    `name` is the file name shown to people."""
+    ref: str
     name: str = ""
     description: str = ""
     rotation: int = 0
     annotations: list[Annotation] = Field(default_factory=list, max_length=200)
 
-    @field_validator("file")
+    @field_validator("ref")
     @classmethod
-    def _file(cls, v: str) -> str:
-        v = (v or "").strip().lower()
-        if not PHOTO_FILE_RE.fullmatch(v):
+    def _ref(cls, v: str) -> str:
+        v = (v or "").strip()
+        if v.startswith("archive:"):
+            v = v.lower()
+        if not PHOTO_REF_RE.fullmatch(v) or v.split(":", 1)[1].startswith("."):
             raise ValueError("invalid photo reference")
         return v
 
@@ -112,6 +117,11 @@ class Report(BaseModel):
     current_revision_no: Optional[int] = None
     saved_at: Optional[str] = None
     saved_by: Optional[str] = None
+    deleted_at: Optional[str] = None
+    # Stale-save protection: the revision the browser loaded (0/None = new).
+    # Save is refused with 409 if someone else saved since, unless force=True.
+    base_revision_no: Optional[int] = None
+    force: bool = False
 
     date: str = ""
     technician: str = ""
@@ -177,6 +187,8 @@ class ReportSummary(BaseModel):
     revision_count: int = 0
     updated_at: Optional[str] = None
     saved_by: Optional[str] = None
+    deleted_at: Optional[str] = None
+    deleted_by: Optional[str] = None
 
 
 class RevisionSummary(BaseModel):
@@ -190,5 +202,18 @@ class RevisionSummary(BaseModel):
 
 
 class UploadedPhoto(BaseModel):
-    file: str
+    ref: str
     name: str
+    width: int = 0
+    height: int = 0
+
+
+class LibraryPhoto(BaseModel):
+    ref: str
+    name: str
+    size: int
+    modified: str
+    sha256: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    in_latest: bool = False

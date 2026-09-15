@@ -1,82 +1,59 @@
-"""Photo normalisation and the local disk cache for photo bytes stored in Forge."""
+"""Image normalisation. Everything the app writes is a JPEG with EXIF rotation
+applied, alpha flattened, longest edge <= 2000 px, quality 82. HEIC/HEIF from
+phones is decoded via pillow-heif when present."""
 import io
-import uuid
-from pathlib import Path
 
 from PIL import Image as PILImage
 from PIL import ImageOps
 
-from .config import PHOTOS_DIR, THUMBS_DIR
+try:  # iPhone HEIC support; optional
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+except Exception:  # pragma: no cover
+    pass
 
 MAX_EDGE = 2000
 JPEG_QUALITY = 82
+THUMB_EDGE = 360
+PDF_EDGE = 1600   # embedded report images never need more than this
 
 
-def optimize_uploaded_bytes(raw: bytes) -> tuple[str, bytes, int, int]:
-    """
-    Apply EXIF orientation, flatten alpha onto white, limit the longest edge
-    to 2000px and encode as optimised progressive JPEG (quality 82).
-    Returns (file_name, jpeg_bytes, width, height). Nothing is written to disk.
-    """
-    filename = f"{uuid.uuid4().hex}.jpg"
+def _flatten(im: PILImage.Image) -> PILImage.Image:
+    if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+        im = im.convert("RGBA")
+        bg = PILImage.new("RGB", im.size, "white")
+        bg.paste(im, mask=im.getchannel("A"))
+        return bg
+    return im if im.mode == "RGB" else im.convert("RGB")
 
+
+def normalize_image_bytes(raw: bytes, max_edge: int = MAX_EDGE, quality: int = JPEG_QUALITY) -> tuple[bytes, int, int]:
+    """Return (jpeg_bytes, width, height). Deterministic for the same input, so
+    the hash of the result is a stable identity for a photo."""
     with PILImage.open(io.BytesIO(raw)) as im:
         try:
             im = ImageOps.exif_transpose(im)
         except Exception:
             pass
-
-        if im.mode in ("RGBA", "LA"):
-            bg = PILImage.new("RGB", im.size, "white")
-            bg.paste(im, mask=im.getchannel("A"))
-            im = bg
-        elif im.mode != "RGB":
-            im = im.convert("RGB")
-
+        im = _flatten(im)
         longest = max(im.width, im.height)
-        if longest > MAX_EDGE:
-            scale = MAX_EDGE / longest
-            im = im.resize(
-                (max(1, int(im.width * scale)), max(1, int(im.height * scale))),
-                PILImage.Resampling.LANCZOS,
-            )
-
+        if longest > max_edge:
+            scale = max_edge / longest
+            im = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), PILImage.Resampling.LANCZOS)
         out = io.BytesIO()
-        im.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
-        return filename, out.getvalue(), im.width, im.height
+        im.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+        return out.getvalue(), im.width, im.height
 
 
-def photo_path(filename: str) -> Path:
-    """Local cache location for a stored photo (may not exist yet)."""
-    return PHOTOS_DIR / Path(filename).name
-
-
-def cache_photo(filename: str, content: bytes) -> Path:
-    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-    p = photo_path(filename)
-    tmp = p.with_suffix(".part")
-    tmp.write_bytes(content)
-    tmp.replace(p)
-    return p
-
-
-THUMB_EDGE = 360
-
-
-def thumb_path(filename: str) -> Path:
-    return THUMBS_DIR / Path(filename).name
-
-
-def make_thumbnail(filename: str) -> Path:
-    """Build (or reuse) a small JPEG for library grids from the cached full image."""
-    THUMBS_DIR.mkdir(parents=True, exist_ok=True)
-    out = thumb_path(filename)
-    if out.exists():
-        return out
-    with PILImage.open(photo_path(filename)) as im:
-        im = im.convert("RGB")
-        im.thumbnail((THUMB_EDGE, THUMB_EDGE), PILImage.Resampling.LANCZOS)
-        tmp = out.with_suffix(".part")
-        im.save(tmp, format="JPEG", quality=78, optimize=True)
-        tmp.replace(out)
-    return out
+def thumbnail_bytes(raw: bytes, edge: int = THUMB_EDGE) -> bytes:
+    with PILImage.open(io.BytesIO(raw)) as im:
+        try:
+            im = ImageOps.exif_transpose(im)
+        except Exception:
+            pass
+        im = _flatten(im)
+        im.thumbnail((edge, edge), PILImage.Resampling.LANCZOS)
+        out = io.BytesIO()
+        im.save(out, format="JPEG", quality=78, optimize=True)
+        return out.getvalue()

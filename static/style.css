@@ -156,6 +156,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .suggestions li:hover .rev, .suggestions li.active .rev { color: #fff; }
 .report-table td.num { text-align: right; }
 .report-table tr.current td { color: var(--cyan); }
+.report-table tr.deleted td { color: var(--muted); }
+.pill { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #4a2222; color: #ffb3b3; margin-left: 6px; font-weight: normal; }
+#show-deleted { accent-color: var(--orange); }
 
 /* ---------- P21 type-ahead ---------- */
 .typeahead { position: relative; }

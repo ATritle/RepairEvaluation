@@ -7,3 +7,4 @@ Pillow>=10.0
 pyodbc>=5.0
 pydantic-settings>=2.0
 auth-middleware[ad] @ git+https://github.com/mrwuss/auth-middleware@v0.14.0
+pillow-heif>=0.16

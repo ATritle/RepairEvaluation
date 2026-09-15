@@ -1,11 +1,11 @@
 """Forge storage for evaluations (schema RepairEval).
 
 One evaluation per repair number; every save appends a revision. Photo bytes
-live in RepairEval.photo_file and are shared across revisions by file name.
+are NOT here: a revision references content-hashed snapshots in the repair's
+drawing folder (see photos.py). Deleting an evaluation is a soft delete.
 pyodbc is synchronous, so the async wrappers run the work in a thread.
 """
 import asyncio
-import hashlib
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +21,16 @@ class ForgeUnavailable(Exception):
 
 class NotFound(Exception):
     pass
+
+
+class StaleSave(Exception):
+    """Someone else saved a newer revision since this one was loaded."""
+
+    def __init__(self, current_revision_no: int, saved_at: Optional[str], saved_by: Optional[str]):
+        super().__init__(f"Revision {current_revision_no} was saved by {saved_by or 'someone'} at {saved_at}")
+        self.current_revision_no = current_revision_no
+        self.saved_at = saved_at
+        self.saved_by = saved_by
 
 
 def _s() -> str:
@@ -59,7 +69,7 @@ def _iso(v: Any) -> Optional[str]:
 # Schema bootstrap
 # --------------------------------------------------------------------------
 def _run_schema_script_sync(path: Path) -> list[str]:
-    """Execute sql/001_repaireval_schema.sql batch by batch (split on GO)."""
+    """Execute a sql/*.sql script batch by batch (split on GO)."""
     sql = path.read_text(encoding="utf-8")
     batches = [b.strip() for b in _split_go(sql) if b.strip()]
     done = []
@@ -88,7 +98,7 @@ def _split_go(sql: str) -> list[str]:
 # Evaluations
 # --------------------------------------------------------------------------
 SUMMARY_SQL = """
-SELECT e.repair_no, e.current_revision_no, e.updated_at,
+SELECT e.repair_no, e.current_revision_no, e.updated_at, e.deleted_at, e.deleted_by,
        r.eval_date, r.technician, r.customer, r.saved_at, r.saved_by,
        (SELECT COUNT(*) FROM {s}.revision_photo p WITH (NOLOCK) WHERE p.revision_id = r.revision_id) AS photo_count
 FROM {s}.evaluation e WITH (NOLOCK)
@@ -107,25 +117,29 @@ def _summary(d: dict[str, Any]) -> dict[str, Any]:
         "revision_count": int(d.get("current_revision_no") or 0),
         "updated_at": _iso(d.get("saved_at") or d.get("updated_at")),
         "saved_by": d.get("saved_by"),
+        "deleted_at": _iso(d.get("deleted_at")),
+        "deleted_by": d.get("deleted_by"),
     }
 
 
-def _list_sync(limit: int) -> list[dict[str, Any]]:
+def _list_sync(limit: int, include_deleted: bool) -> list[dict[str, Any]]:
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(f"SELECT TOP (?) * FROM ({SUMMARY_SQL.format(s=_s())}) x ORDER BY updated_at DESC", [limit])
+        cur.execute(f"SELECT TOP (?) * FROM ({SUMMARY_SQL.format(s=_s())}) x {where} ORDER BY updated_at DESC", [limit])
         return [_summary(d) for d in _rows(cur)]
 
 
-def _search_sync(query: str, limit: int) -> list[dict[str, Any]]:
+def _search_sync(query: str, limit: int, include_deleted: bool) -> list[dict[str, Any]]:
     q = like_escape(query[:100])
     like = f"{q}%"
     contains = f"%{q}%"
+    deleted = "" if include_deleted else "AND deleted_at IS NULL"
     with _connect() as cn:
         cur = cn.cursor()
         cur.execute(
             f"""SELECT TOP (?) * FROM ({SUMMARY_SQL.format(s=_s())}) x
-                WHERE repair_no LIKE ? ESCAPE '\\' OR customer LIKE ? ESCAPE '\\'
+                WHERE (repair_no LIKE ? ESCAPE '\\' OR customer LIKE ? ESCAPE '\\') {deleted}
                 ORDER BY CASE WHEN repair_no LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END, updated_at DESC""",
             [limit, contains, contains, like],
         )
@@ -137,13 +151,13 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
     with _connect() as cn:
         cur = cn.cursor()
         cur.execute(
-            f"SELECT evaluation_id, current_revision_no FROM {s}.evaluation WITH (NOLOCK) WHERE repair_no = ?",
+            f"SELECT evaluation_id, current_revision_no, deleted_at FROM {s}.evaluation WITH (NOLOCK) WHERE repair_no = ?",
             [repair_no],
         )
         ev = cur.fetchone()
         if ev is None:
             raise NotFound(f"No evaluation for repair number {repair_no}")
-        evaluation_id, current = ev
+        evaluation_id, current, deleted_at = ev
         rev_no = revision_no if revision_no is not None else current
         cur.execute(
             f"SELECT * FROM {s}.revision WITH (NOLOCK) WHERE evaluation_id = ? AND revision_no = ?",
@@ -154,11 +168,12 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
             raise NotFound(f"Repair {repair_no} has no revision {rev_no}")
         r = rows[0]
         cur.execute(
-            f"""SELECT revision_photo_id, seq, file_name, display_name, description, rotation
+            f"""SELECT revision_photo_id, seq, sha256, source_name, display_name, description, rotation
                 FROM {s}.revision_photo WITH (NOLOCK) WHERE revision_id = ? ORDER BY seq""",
             [r["revision_id"]],
         )
         photos = _rows(cur)
+        by_photo: dict[int, list[dict[str, Any]]] = {}
         if photos:
             ids = [p["revision_photo_id"] for p in photos]
             marks = ",".join("?" * len(ids))
@@ -168,13 +183,11 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
                     WHERE revision_photo_id IN ({marks}) ORDER BY revision_photo_id, seq""",
                 ids,
             )
-            by_photo: dict[int, list[dict[str, Any]]] = {}
             for a in _rows(cur):
-                by_photo.setdefault(a["revision_photo_id"], []).append(
-                    {"symbol": a["symbol"], "x": float(a["x"]), "y": float(a["y"]), "size": int(a["size_pct"]), "color": (a.get("color") or "#ff0000").strip()}
-                )
-        else:
-            by_photo = {}
+                by_photo.setdefault(a["revision_photo_id"], []).append({
+                    "symbol": a["symbol"], "x": float(a["x"]), "y": float(a["y"]),
+                    "size": int(a["size_pct"]), "color": (a.get("color") or "#ff0000").strip(),
+                })
 
     return {
         "repair_no": repair_no,
@@ -182,6 +195,7 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
         "current_revision_no": int(current),
         "saved_at": _iso(r["saved_at"]),
         "saved_by": r.get("saved_by"),
+        "deleted_at": _iso(deleted_at),
         "date": _iso(r.get("eval_date")) or "",
         "technician": r.get("technician") or "",
         "customer": r.get("customer") or "",
@@ -198,15 +212,31 @@ def _load_sync(repair_no: str, revision_no: Optional[int]) -> dict[str, Any]:
         "findings": r.get("findings") or "",
         "photos": [
             {
-                "file": p["file_name"],
-                "name": p.get("display_name") or "",
+                "ref": f"archive:{(p['sha256'] or '').strip()}",
+                "name": p.get("source_name") or p.get("display_name") or "",
                 "description": p.get("description") or "",
                 "rotation": int(p.get("rotation") or 0),
                 "annotations": by_photo.get(p["revision_photo_id"], []),
             }
             for p in photos
+            if (p.get("sha256") or "").strip()
         ],
     }
+
+
+def _latest_shas_sync(repair_no: str) -> set[str]:
+    """Snapshot hashes on the current revision (to flag library photos already on the report)."""
+    s = _s()
+    with _connect() as cn:
+        cur = cn.cursor()
+        cur.execute(
+            f"""SELECT vp.sha256 FROM {s}.revision_photo vp WITH (NOLOCK)
+                JOIN {s}.revision r WITH (NOLOCK) ON r.revision_id = vp.revision_id
+                JOIN {s}.evaluation e WITH (NOLOCK) ON e.evaluation_id = r.evaluation_id
+                WHERE e.repair_no = ? AND r.revision_no = e.current_revision_no AND vp.sha256 IS NOT NULL""",
+            [repair_no],
+        )
+        return {row[0].strip() for row in cur.fetchall()}
 
 
 def _revisions_sync(repair_no: str) -> list[dict[str, Any]]:
@@ -236,8 +266,13 @@ def _revisions_sync(repair_no: str) -> list[dict[str, Any]]:
         ]
 
 
-def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
-    """Append a revision for data['repair_no'] (creating the evaluation if new)."""
+def _save_sync(data: dict[str, Any], saved_by: Optional[str], snapshots: list[dict[str, Any]],
+               base_revision_no: Optional[int], force: bool) -> dict[str, Any]:
+    """Append a revision for data['repair_no'] (creating or un-deleting the evaluation).
+
+    `snapshots` is the photo list with each entry already frozen:
+    {sha256, archive_path, source_name, description, rotation, annotations}.
+    Raises StaleSave when the evaluation moved past base_revision_no and not force."""
     s = _s()
     repair_no = (data.get("repair_no") or "").strip()
     if not repair_no:
@@ -261,15 +296,22 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
             )
             row = cur.fetchone()
             if row is None:
-                cur.execute(
-                    f"INSERT INTO {s}.evaluation (repair_no) OUTPUT INSERTED.evaluation_id VALUES (?)", [repair_no]
-                )
+                cur.execute(f"INSERT INTO {s}.evaluation (repair_no) OUTPUT INSERTED.evaluation_id VALUES (?)", [repair_no])
                 evaluation_id = int(cur.fetchone()[0])
-                next_rev = 1
+                current = 0
             else:
-                evaluation_id, current = row
-                next_rev = int(current) + 1
+                evaluation_id, current = int(row[0]), int(row[1])
 
+            if not force and base_revision_no is not None and current != int(base_revision_no):
+                cur.execute(
+                    f"SELECT saved_at, saved_by FROM {s}.revision WITH (NOLOCK) WHERE evaluation_id = ? AND revision_no = ?",
+                    [evaluation_id, current],
+                )
+                latest = cur.fetchone()
+                cn.rollback()
+                raise StaleSave(current, _iso(latest[0]) if latest else None, latest[1] if latest else None)
+
+            next_rev = current + 1
             cur.execute(
                 f"""INSERT INTO {s}.revision
                     (evaluation_id, revision_no, saved_by, eval_date, technician, customer, customer_id,
@@ -289,11 +331,13 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
             )
             revision_id = int(cur.fetchone()[0])
 
-            for seq, p in enumerate(data.get("photos") or [], start=1):
+            for seq, p in enumerate(snapshots, start=1):
                 cur.execute(
-                    f"""INSERT INTO {s}.revision_photo (revision_id, seq, file_name, display_name, description, rotation)
-                        OUTPUT INSERTED.revision_photo_id VALUES (?,?,?,?,?,?)""",
-                    [revision_id, seq, p["file"], p.get("name") or None, p.get("description") or None,
+                    f"""INSERT INTO {s}.revision_photo
+                        (revision_id, seq, sha256, archive_path, source_name, display_name, description, rotation)
+                        OUTPUT INSERTED.revision_photo_id VALUES (?,?,?,?,?,?,?,?)""",
+                    [revision_id, seq, p["sha256"], p["archive_path"], (p.get("source_name") or "")[:260] or None,
+                     (p.get("source_name") or "")[:260] or None, p.get("description") or None,
                      int(p.get("rotation") or 0) % 360],
                 )
                 photo_id = int(cur.fetchone()[0])
@@ -310,10 +354,14 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
                     )
 
             cur.execute(
-                f"UPDATE {s}.evaluation SET current_revision_no = ?, updated_at = SYSDATETIME() WHERE evaluation_id = ?",
+                f"""UPDATE {s}.evaluation
+                    SET current_revision_no = ?, updated_at = SYSDATETIME(), deleted_at = NULL, deleted_by = NULL
+                    WHERE evaluation_id = ?""",
                 [next_rev, evaluation_id],
             )
             cn.commit()
+        except StaleSave:
+            raise
         except Exception:
             cn.rollback()
             raise
@@ -321,136 +369,41 @@ def _save_sync(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
     return _load_sync(repair_no, next_rev)
 
 
-def _delete_sync(repair_no: str) -> bool:
+def _soft_delete_sync(repair_no: str, who: Optional[str]) -> bool:
     with _connect() as cn:
         cur = cn.cursor()
-        cur.execute(f"DELETE FROM {_s()}.evaluation WHERE repair_no = ?", [repair_no])
+        cur.execute(
+            f"UPDATE {_s()}.evaluation SET deleted_at = SYSDATETIME(), deleted_by = ? WHERE repair_no = ? AND deleted_at IS NULL",
+            [who, repair_no],
+        )
         n = cur.rowcount
         cn.commit()
     return n > 0
 
 
-# --------------------------------------------------------------------------
-# Photo files
-# --------------------------------------------------------------------------
-def _photo_exists_sync(file_name: str) -> bool:
-    with _connect() as cn:
-        cur = cn.cursor()
-        cur.execute(f"SELECT 1 FROM {_s()}.photo_file WITH (NOLOCK) WHERE file_name = ?", [file_name])
-        return cur.fetchone() is not None
-
-
-def _photo_locate_sync(file_name: str) -> Optional[dict[str, Any]]:
-    """Where a photo's bytes are: {'storage': 'db'|'fs', 'path': ..., 'content': bytes|None}."""
+def _restore_sync(repair_no: str) -> bool:
     with _connect() as cn:
         cur = cn.cursor()
         cur.execute(
-            f"SELECT storage, path, content FROM {_s()}.photo_file WITH (NOLOCK) WHERE file_name = ?", [file_name]
-        )
-        row = cur.fetchone()
-        if row is None:
-            return None
-        storage, path, content = row
-        return {"storage": (storage or "db").strip(), "path": path, "content": bytes(content) if content is not None else None}
-
-
-def _photo_put_sync(file_name: str, original_name: str, content: Optional[bytes], width: int, height: int,
-                    uploaded_by: Optional[str], storage: str, path: Optional[str], byte_size: int,
-                    sha_source: bytes) -> None:
-    digest = hashlib.sha256(sha_source).hexdigest()
-    with _connect() as cn:
-        cur = cn.cursor()
-        cur.execute(
-            f"""INSERT INTO {_s()}.photo_file
-                (file_name, original_name, content_type, width_px, height_px, byte_size, sha256, content,
-                 uploaded_by, storage, path)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            [file_name, original_name[:260] if original_name else None, "image/jpeg", width, height,
-             byte_size, digest, pyodbc.Binary(content) if content is not None else None, uploaded_by,
-             storage, path],
-        )
-        cn.commit()
-
-
-# --------------------------------------------------------------------------
-# Photo library (per repair number, independent of revisions)
-# --------------------------------------------------------------------------
-def _library_add_sync(repair_no: str, file_name: str, original_name: Optional[str], source: str,
-                      uploaded_by: Optional[str]) -> None:
-    with _connect() as cn:
-        cur = cn.cursor()
-        cur.execute(
-            f"""MERGE {_s()}.repair_photo AS t
-                USING (SELECT ? AS repair_no, ? AS file_name) AS s
-                   ON t.repair_no = s.repair_no AND t.file_name = s.file_name
-                WHEN MATCHED THEN UPDATE SET removed_at = NULL
-                WHEN NOT MATCHED THEN
-                    INSERT (repair_no, file_name, original_name, source, uploaded_by)
-                    VALUES (s.repair_no, s.file_name, ?, ?, ?);""",
-            [repair_no, file_name, original_name[:260] if original_name else None, source, uploaded_by],
-        )
-        cn.commit()
-
-
-def _library_list_sync(repair_no: str) -> list[dict[str, Any]]:
-    s = _s()
-    with _connect() as cn:
-        cur = cn.cursor()
-        cur.execute(
-            f"""SELECT rp.file_name, rp.original_name, rp.caption, rp.source, rp.uploaded_at, rp.uploaded_by,
-                       pf.width_px, pf.height_px, pf.byte_size,
-                       (SELECT COUNT(*) FROM {s}.revision_photo vp WITH (NOLOCK)
-                          JOIN {s}.revision r WITH (NOLOCK) ON r.revision_id = vp.revision_id
-                          JOIN {s}.evaluation e WITH (NOLOCK) ON e.evaluation_id = r.evaluation_id
-                         WHERE vp.file_name = rp.file_name AND e.repair_no = rp.repair_no
-                           AND r.revision_no = e.current_revision_no) AS in_latest
-                FROM {s}.repair_photo rp WITH (NOLOCK)
-                JOIN {s}.photo_file pf WITH (NOLOCK) ON pf.file_name = rp.file_name
-                WHERE rp.repair_no = ? AND rp.removed_at IS NULL
-                ORDER BY rp.uploaded_at DESC, rp.repair_photo_id DESC""",
+            f"UPDATE {_s()}.evaluation SET deleted_at = NULL, deleted_by = NULL WHERE repair_no = ? AND deleted_at IS NOT NULL",
             [repair_no],
         )
-        return [
-            {
-                "file": d["file_name"],
-                "name": d.get("original_name") or "",
-                "caption": d.get("caption") or "",
-                "source": d.get("source") or "web",
-                "uploaded_at": _iso(d.get("uploaded_at")),
-                "uploaded_by": d.get("uploaded_by"),
-                "width": d.get("width_px"),
-                "height": d.get("height_px"),
-                "bytes": int(d.get("byte_size") or 0),
-                "in_latest": bool(d.get("in_latest")),
-            }
-            for d in _rows(cur)
-        ]
-
-
-def _library_remove_sync(repair_no: str, file_name: str) -> bool:
-    with _connect() as cn:
-        cur = cn.cursor()
-        cur.execute(
-            f"UPDATE {_s()}.repair_photo SET removed_at = SYSDATETIME() WHERE repair_no = ? AND file_name = ? AND removed_at IS NULL",
-            [repair_no, file_name],
-        )
         n = cur.rowcount
         cn.commit()
     return n > 0
 
 
-def _library_recent_repairs_sync(limit: int) -> list[dict[str, Any]]:
-    """Repair numbers that received photos recently (for the mobile page)."""
+def _recent_repairs_sync(limit: int) -> list[dict[str, Any]]:
+    """Recently saved evaluations (for the phone page's quick picks)."""
     with _connect() as cn:
         cur = cn.cursor()
         cur.execute(
-            f"""SELECT TOP (?) repair_no, COUNT(*) AS photos, MAX(uploaded_at) AS last_upload
-                FROM {_s()}.repair_photo WITH (NOLOCK)
-                WHERE removed_at IS NULL
-                GROUP BY repair_no ORDER BY MAX(uploaded_at) DESC""",
+            f"""SELECT TOP (?) repair_no, current_revision_no, updated_at
+                FROM {_s()}.evaluation WITH (NOLOCK) WHERE deleted_at IS NULL ORDER BY updated_at DESC""",
             [limit],
         )
-        return [{"repair_no": d["repair_no"], "photos": int(d["photos"]), "last_upload": _iso(d["last_upload"])} for d in _rows(cur)]
+        return [{"repair_no": d["repair_no"], "revisions": int(d["current_revision_no"]), "updated_at": _iso(d["updated_at"])}
+                for d in _rows(cur)]
 
 
 def _ping_sync() -> dict[str, Any]:
@@ -458,7 +411,7 @@ def _ping_sync() -> dict[str, Any]:
         cur = cn.cursor()
         cur.execute("SELECT @@SERVERNAME, DB_NAME(), SUSER_SNAME()")
         server, db, user = cur.fetchone()
-        cur.execute(f"SELECT COUNT(*) FROM {_s()}.evaluation WITH (NOLOCK)")
+        cur.execute(f"SELECT COUNT(*) FROM {_s()}.evaluation WITH (NOLOCK) WHERE deleted_at IS NULL")
         n = cur.fetchone()[0]
     return {"server": server, "database": db, "user": user, "schema": _s(), "evaluations": int(n)}
 
@@ -466,60 +419,41 @@ def _ping_sync() -> dict[str, Any]:
 # --------------------------------------------------------------------------
 # async facade
 # --------------------------------------------------------------------------
-async def list_evaluations(limit: int = 200) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_list_sync, limit)
+async def list_evaluations(limit: int = 200, include_deleted: bool = False) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_sync, limit, include_deleted)
 
 
-async def search_evaluations(query: str, limit: int = 25) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_search_sync, query, limit)
+async def search_evaluations(query: str, limit: int = 25, include_deleted: bool = False) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_search_sync, query, limit, include_deleted)
 
 
 async def load_evaluation(repair_no: str, revision_no: Optional[int] = None) -> dict[str, Any]:
     return await asyncio.to_thread(_load_sync, repair_no, revision_no)
 
 
+async def latest_snapshot_hashes(repair_no: str) -> set[str]:
+    return await asyncio.to_thread(_latest_shas_sync, repair_no)
+
+
 async def list_revisions(repair_no: str) -> list[dict[str, Any]]:
     return await asyncio.to_thread(_revisions_sync, repair_no)
 
 
-async def save_evaluation(data: dict[str, Any], saved_by: Optional[str]) -> dict[str, Any]:
-    return await asyncio.to_thread(_save_sync, data, saved_by)
+async def save_evaluation(data: dict[str, Any], saved_by: Optional[str], snapshots: list[dict[str, Any]],
+                          base_revision_no: Optional[int], force: bool) -> dict[str, Any]:
+    return await asyncio.to_thread(_save_sync, data, saved_by, snapshots, base_revision_no, force)
 
 
-async def delete_evaluation(repair_no: str) -> bool:
-    return await asyncio.to_thread(_delete_sync, repair_no)
+async def soft_delete_evaluation(repair_no: str, who: Optional[str]) -> bool:
+    return await asyncio.to_thread(_soft_delete_sync, repair_no, who)
 
 
-async def photo_exists(file_name: str) -> bool:
-    return await asyncio.to_thread(_photo_exists_sync, file_name)
+async def restore_evaluation(repair_no: str) -> bool:
+    return await asyncio.to_thread(_restore_sync, repair_no)
 
 
-async def photo_locate(file_name: str) -> Optional[dict[str, Any]]:
-    return await asyncio.to_thread(_photo_locate_sync, file_name)
-
-
-async def photo_put(file_name: str, original_name: str, content: Optional[bytes], width: int, height: int,
-                    uploaded_by: Optional[str], *, storage: str, path: Optional[str], byte_size: int,
-                    sha_source: bytes) -> None:
-    await asyncio.to_thread(_photo_put_sync, file_name, original_name, content, width, height, uploaded_by,
-                            storage, path, byte_size, sha_source)
-
-
-async def library_add(repair_no: str, file_name: str, original_name: Optional[str], source: str,
-                      uploaded_by: Optional[str]) -> None:
-    await asyncio.to_thread(_library_add_sync, repair_no, file_name, original_name, source, uploaded_by)
-
-
-async def library_list(repair_no: str) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_library_list_sync, repair_no)
-
-
-async def library_remove(repair_no: str, file_name: str) -> bool:
-    return await asyncio.to_thread(_library_remove_sync, repair_no, file_name)
-
-
-async def library_recent_repairs(limit: int = 20) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_library_recent_repairs_sync, limit)
+async def recent_repairs(limit: int = 20) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_recent_repairs_sync, limit)
 
 
 async def ping() -> dict[str, Any]:

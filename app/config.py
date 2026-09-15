@@ -7,7 +7,6 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 STATIC = ROOT / "static"
 DATA = ROOT / "data"
-PHOTOS_DIR = DATA / "photos"   # local cache of Forge photo bytes
 THUMBS_DIR = DATA / "thumbs"   # generated thumbnails for the library grid
 
 APP_LOGO = ASSETS / "ifp_logo_app.png"
@@ -47,9 +46,8 @@ COLORS = [
     {"label": "Black", "value": "#000000"},
 ]
 
-ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".heic", ".heif", ".tif", ".tiff", ".gif"}
 
 
 def ensure_dirs() -> None:
-    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     THUMBS_DIR.mkdir(parents=True, exist_ok=True)

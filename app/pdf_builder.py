@@ -26,7 +26,7 @@ from reportlab.platypus import (
 )
 
 from .config import PDF_LOGO
-from .images import photo_path
+from .images import PDF_EDGE
 
 
 def image_size(path: Path, max_w: float, max_h: float) -> tuple[float, float]:
@@ -110,30 +110,42 @@ def _draw_pdf_annotations(im, annotations, display_width_px, display_height_px) 
 
 
 def _pdf_image_path(photo: dict, temp_dir: str) -> Path:
-    """Create a PDF-ready image with rotation and correctly scaled markups."""
-    source = photo_path(photo["file"])
+    """Create a PDF-ready image: downscaled (a hand-copied 20 MB original must
+    not bloat the report), rotated, with correctly scaled markups.
+
+    `photo["local_path"]` is filled in by the caller (main.py) - the resolved
+    file on the share for this photo's reference."""
+    source = Path(photo.get("local_path") or "")
     rotation = int(photo.get("rotation", 0)) % 360
     annotations = photo.get("annotations", []) or []
 
-    if not source.exists():
-        return source
-    if rotation == 0 and not annotations:
-        return source
+    if not source or not source.exists():
+        return Path(temp_dir) / "missing.jpg"   # does not exist -> "Image unavailable"
 
     existing = list(Path(temp_dir).glob("annotated_*"))
     output = Path(temp_dir) / f"annotated_{len(existing):04d}.jpg"
 
     with PILImage.open(source) as im:
-        if rotation:
-            # Positive rotation is clockwise visually, matching the browser canvas.
-            im = im.rotate(-rotation, expand=True)
-
+        try:
+            from PIL import ImageOps
+            im = ImageOps.exif_transpose(im)
+        except Exception:
+            pass
         if im.mode in ("RGBA", "LA"):
             background = PILImage.new("RGB", im.size, "white")
             background.paste(im, mask=im.getchannel("A"))
             im = background
         elif im.mode != "RGB":
             im = im.convert("RGB")
+
+        longest = max(im.width, im.height)
+        if longest > PDF_EDGE:
+            scale = PDF_EDGE / longest
+            im = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), PILImage.Resampling.LANCZOS)
+
+        if rotation:
+            # Positive rotation is clockwise visually, matching the browser canvas.
+            im = im.rotate(-rotation, expand=True)
 
         max_w = 3.35 * 72
         max_h = 2.35 * 72

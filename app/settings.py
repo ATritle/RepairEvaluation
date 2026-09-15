@@ -24,10 +24,9 @@ class Settings(BaseSettings):
     forge_driver: str = "ODBC Driver 17 for SQL Server"
     forge_timeout: int = 10
 
-    # Photo bytes: "fs" = <photo_fs_root>\R36000\R36169\Photos\<file>.jpg (the Dwgs
-    # share), "db" = VARBINARY in Forge.RepairEval.photo_file. Metadata is always in Forge.
-    photo_store: str = "fs"
-    photo_fs_root: str = "data/photo_store"
+    # Photos live in <photo_fs_root>\R36000\R36169\Photos (the Dwgs share, UNC path).
+    # Point at data/test_dwgs for local testing - never test against the live share.
+    photo_fs_root: str = "data/test_dwgs"
 
     # Windows AD sign-in (auth-middleware package). auth_enabled=False injects
     # auth_dev_user on every request - local development only.

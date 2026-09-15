@@ -85,7 +85,6 @@ FORGE_SCHEMA=RepairEval
 FORGE_USER=<login with read/write on Forge.RepairEval>
 FORGE_PASSWORD=<password>
 
-PHOTO_STORE=fs                    # fs = files under PHOTO_FS_ROOT, db = VARBINARY in Forge
 PHOTO_FS_ROOT=\\eha-serv.ifp.eha\data\Dwgs   # the drawings root on the N drive (N:\Dwgs)
 ```
 
@@ -106,36 +105,40 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
   above the form shows which revision is loaded; **History** lists all
   revisions and lets you view any of them. Saving while viewing an old
   revision creates a new latest revision from that version.
-- Photo **metadata** is always in Forge (`RepairEval.photo_file`, shared across
-  revisions by file name). Photo **bytes** go where `PHOTO_STORE` says:
-  `fs` (default) files each photo in the **repair's drawing folder on the N
-  drive**: `N:\Dwgs\R36000\R36169\Photos\<file>.jpg`, i.e. the series folder
-  (R-number rounded down to the thousand), the numbered job folder, and a
-  `Photos` sub-folder. The series and job folders must already exist (they
-  come from the drawing/job process); the app creates only `Photos`. If the
-  repair number is not an R-number, or its folder is missing, the upload is
-  refused with a clear message, and both pages show where photos will go (or
-  why they can't) as soon as a Repair # is entered. `PHOTO_FS_ROOT` is the
-  Dwgs share as a UNC path, not the `N:` letter, so a service account can
-  reach it. `db` keeps bytes as VARBINARY in the row instead. Each row records
-  which, and a row may carry an absolute path (photos migrated from earlier
-  layouts); `scripts/migrate_photos.py` moves photos into their drawing
-  folders where those exist. `data/photos/` is only a local cache used by the
-  PDF builder.
+- **Stale-save warning.** If someone else saved a newer revision while you
+  were editing, Save stops and tells you who and when; you can look at their
+  revision or save anyway as the next one.
+- **Delete is a soft delete.** The evaluation disappears from lists and
+  lookups but every revision is kept; "Show deleted" in the Open dialog lists
+  them with a Restore button. Saving a deleted repair number restores it.
+- **Photos live in the repair's drawing folder on the N drive.** The folder is
+  the library: `N:\Dwgs\R36000\R36169\Photos\` (series = R-number rounded down
+  to the thousand, then the job folder). Whatever is in that folder shows up in
+  the app, whether it came from the phone page, the desktop uploader or
+  Explorer. Uploads are normalised on the way in (EXIF rotation, 2000 px
+  longest edge, JPEG 82) and named `<yyyymmdd-HHMMSS>_<original>.jpg`. The
+  series and job folders must already exist; the app creates only `Photos`,
+  `Photos\.archive`, `Photos\.removed` and `Reports`. Non-R-numbers and
+  missing folders are refused with a clear message.
+- **Saved revisions are immutable.** On Save, each photo on the report is
+  normalised, hashed and copied once into `Photos\.archive\<sha256>.jpg`; the
+  revision references that snapshot, so renaming or removing a file in the
+  live folder never changes history. Saving the same photo on ten revisions
+  stores it once. The PDF is also written to `Reports\<R> rev<N>.pdf`.
+- "Remove from library" moves the file into `Photos\.removed`; nothing is
+  ever deleted by the app.
+- `PHOTO_FS_ROOT` is the Dwgs share as a UNC path, not the `N:` letter, so a
+  service account can reach it. `data/thumbs/` is a local thumbnail cache.
 
-Tables: `evaluation` (repair number, current revision), `revision` (all form
-fields + saved_at / saved_by), `revision_photo` (order, description,
-rotation), `photo_annotation` (symbol, x, y, size, colour per markup), `photo_file`
-(JPEG bytes).
+Tables: `evaluation` (repair number, current revision, soft-delete stamp),
+`revision` (all form fields + saved_at / saved_by), `revision_photo` (snapshot
+hash + archive path, order, description, rotation), `photo_annotation`
+(symbol, x, y, size, colour per markup).
 
-**Who did it.** There is no login. Phones have no domain user, so the phone
-page asks the technician to pick their name once (remembered on the device)
-and sends it with every upload; the desktop form uses its Technician
-drop-down. Both are recorded as `NAME @client-address` in `uploaded_by` /
-`saved_by`, so a self-declared name is still traceable. If the app is later
-put behind an authenticating proxy, the `X-Forwarded-User` header takes
-precedence automatically. Microsoft Entra sign-in is the upgrade path if real
-identity on phones is needed.
+**Who did it.** `saved_by` is the signed-in Windows account,
+`jsmith (John Smith)` (see Sign-in below). With `AUTH_ENABLED=false` (dev
+only) the phone page falls back to a technician picker and records
+`NAME @client-address`.
 
 ### Links
 
@@ -153,87 +156,21 @@ and `.../pdf` on either for the report.
 
 ### Photo library and phone capture (`/mobile`)
 
-Every photo is filed in a **library keyed on the repair number**
-(`RepairEval.repair_photo`), independent of evaluations and revisions.
-
 - **`/mobile`** is a phone-sized page: enter the repair number (or open
   `/mobile/R123456`, e.g. from a QR code; the address bar follows the field),
-  then **Take Photo** or **Choose Photos**. Uploads go straight into that repair's library and the page shows
-  what is already there. Recent repair numbers are one tap away.
-- In the evaluation form, **📚 Photo Library** opens a grid of everything in
-  the library for the current Repair #, with a badge showing how many are not
-  yet on the report. Click to select, **Add selected to report**. Photos
-  already on the report are marked. **📱 Phone Upload** opens `/mobile`
-  pre-filled with the current repair number.
-- Photos added with **+ ADD PHOTO** are also filed in the library when the
-  form has a Repair #.
-- Removing a photo from the library is a soft delete; saved revisions that use
-  it are untouched. Thumbnails are generated on demand (`/photos/<file>?thumb=1`).
+  then **Take Photo** or **Choose Photos**. Photos are shrunk on the phone
+  before upload (a 20 MB shot leaves as about 1 MB), queued, retried three
+  times on a flaky connection, and land in the repair's `Photos` folder. The
+  page shows the folder's contents and flags photos already on the saved report.
+- In the evaluation form, **📚 Photo Library** shows the folder with
+  thumbnails; click to select, **Add selected to report**. **📱 Phone Upload**
+  opens `/mobile` pre-filled. **+ ADD PHOTO** uploads into the same folder.
 
-Endpoints: `POST /api/mobile/photos` (form: `repair_no`, `files[]`),
-`GET /api/repairs/{repair_no}/photos`, `DELETE /api/repairs/{repair_no}/photos/{file}`,
-`GET /api/repairs/recent`.
-
-### Sign-in (Windows AD)
-
-Uses the shared IFP package [`auth-middleware`](https://github.com/mrwuss/auth-middleware)
-(pinned to a tag in `requirements.txt`). The first request gets a browser
-credential prompt; the domain username and password are checked with Windows
-`LogonUser` on the (domain-joined) server and a signed session cookie is
-issued, so there is one prompt per browser session. Works the same on phones.
-
-On top of the package this app adds:
-
-- **Group gate**: `AUTH_GROUP=<AD security group>` refuses signed-in users who
-  are not direct members (403 with a plain message). Blank = any domain user.
-- **Identity on records**: `saved_by` / `uploaded_by` become
-  `jsmith (John Smith)`. The technician picker on the phone page disappears
-  when a user is signed in.
-- `/api/me`, `/logout`, `/health` (exempt, for Caddy/NSSM health checks).
-  `/static` and `/assets` are exempt; everything else, photos and API
-  included, requires sign-in.
-
-Settings: `AUTH_ENABLED` (false = dev mode, every request is `AUTH_DEV_USER`),
-`AUTH_DOMAIN`, `AUTH_GROUP`, `AUTH_COOKIE_SECURE` (true behind HTTPS),
-`AUTH_COOKIE_SECRET` (blank = generated once into `data/auth_cookie_secret`).
-
-## Deployment (repairs.ifpusa.com behind Caddy + NSSM)
-
-1. On the app server: clone the branch, `python -m venv .venv`,
-   `.venv\Scripts\pip install -r requirements.txt`, copy `.env.example` to
-   `.env` and fill in the Forge/P21 logins, `AUTH_GROUP`, and set
-   `AUTH_COOKIE_SECURE=true`.
-2. **Service account** running the NSSM service needs: Modify on
-   `\\eha-serv.ifp.eha\data\Dwgs` job folders (to create `Photos` and write
-   files), and to be a domain account so `LogonUser` and the group lookups
-   can reach a DC. SQL logins are SQL auth, so nothing extra there.
-3. NSSM application: `<repo>\.venv\Scripts\python.exe`, arguments:
-
-   ```
-   -m uvicorn app.main:app --host 127.0.0.1 --port 6969 --proxy-headers --forwarded-allow-ips=127.0.0.1
-   ```
-
-   Bind to loopback so Caddy is the only way in. `--proxy-headers` makes
-   `saved_by` record the phone's address rather than Caddy's.
-4. Caddyfile:
-
-   ```
-   repairs.ifpusa.com {
-       reverse_proxy 127.0.0.1:6969
-   }
-   ```
-
-   Caddy handles TLS and forwards `X-Forwarded-For`/`-Proto`. No auth config
-   in Caddy; the app does it.
-5. Health check: `GET /health` returns `{"ok": true}` without sign-in.
-
-### Testing photo storage safely
-
-Never point a test at the live `Dwgs` share: every job folder there is real,
-including ones that look unused. For local testing set
-`PHOTO_FS_ROOT=data/test_dwgs` in `.env` (a sandbox tree with `R90000/R90001`
-and `R90002`, gitignored) and use repair numbers in that range, or mock
-`photo_store.fs_root` to a temp directory as the unit check in the history does.
+Endpoints: `GET /api/repairs/{repair_no}/folder`, `GET /api/repairs/{repair_no}/photos`,
+`POST /api/photos` and `POST /api/mobile/photos` (form `repair_no` + `files[]`),
+`DELETE /api/repairs/{repair_no}/photos/{name}`; images at
+`/repairs/{repair_no}/photos/{name}` and `/repairs/{repair_no}/archive/{sha}`
+(`?thumb=1` for a thumbnail).
 
 ### Input hardening
 
