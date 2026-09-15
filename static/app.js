@@ -966,6 +966,17 @@
     refreshLibraryCount();
   });
 
+  async function showWhoAmI() {
+    try {
+      const me = await (await api("/api/me")).json();
+      if (me.auth_enabled && me.user) {
+        const el = $("#whoami");
+        el.innerHTML = `Signed in as <b>${esc(me.name || me.user)}</b> · <a href="/logout">sign out</a>`;
+        el.hidden = false;
+      }
+    } catch (_) { /* header stays quiet */ }
+  }
+
   async function checkStorage() {
     try {
       const st = await (await api("/api/storage/status")).json();
@@ -1482,7 +1493,7 @@
     fillColorSelect($("#zoom-color"));
     if (cfg.version) $("#about-version").textContent = `Version ${cfg.version}`;
     const link = parseUrl();          // read before the blank form resets the address bar
-    await Promise.all([checkP21(), checkStorage()]);
+    await Promise.all([checkP21(), checkStorage(), showWhoAmI()]);
     newReport(true);
     if (link) await loadReport(link.repairNo, link.revision, null);
   }

@@ -174,6 +174,59 @@ Endpoints: `POST /api/mobile/photos` (form: `repair_no`, `files[]`),
 `GET /api/repairs/{repair_no}/photos`, `DELETE /api/repairs/{repair_no}/photos/{file}`,
 `GET /api/repairs/recent`.
 
+### Sign-in (Windows AD)
+
+Uses the shared IFP package [`auth-middleware`](https://github.com/mrwuss/auth-middleware)
+(pinned to a tag in `requirements.txt`). The first request gets a browser
+credential prompt; the domain username and password are checked with Windows
+`LogonUser` on the (domain-joined) server and a signed session cookie is
+issued, so there is one prompt per browser session. Works the same on phones.
+
+On top of the package this app adds:
+
+- **Group gate**: `AUTH_GROUP=<AD security group>` refuses signed-in users who
+  are not direct members (403 with a plain message). Blank = any domain user.
+- **Identity on records**: `saved_by` / `uploaded_by` become
+  `jsmith (John Smith)`. The technician picker on the phone page disappears
+  when a user is signed in.
+- `/api/me`, `/logout`, `/health` (exempt, for Caddy/NSSM health checks).
+  `/static` and `/assets` are exempt; everything else, photos and API
+  included, requires sign-in.
+
+Settings: `AUTH_ENABLED` (false = dev mode, every request is `AUTH_DEV_USER`),
+`AUTH_DOMAIN`, `AUTH_GROUP`, `AUTH_COOKIE_SECURE` (true behind HTTPS),
+`AUTH_COOKIE_SECRET` (blank = generated once into `data/auth_cookie_secret`).
+
+## Deployment (repairs.ifpusa.com behind Caddy + NSSM)
+
+1. On the app server: clone the branch, `python -m venv .venv`,
+   `.venv\Scripts\pip install -r requirements.txt`, copy `.env.example` to
+   `.env` and fill in the Forge/P21 logins, `AUTH_GROUP`, and set
+   `AUTH_COOKIE_SECURE=true`.
+2. **Service account** running the NSSM service needs: Modify on
+   `\\eha-serv.ifp.eha\data\Dwgs` job folders (to create `Photos` and write
+   files), and to be a domain account so `LogonUser` and the group lookups
+   can reach a DC. SQL logins are SQL auth, so nothing extra there.
+3. NSSM application: `<repo>\.venv\Scripts\python.exe`, arguments:
+
+   ```
+   -m uvicorn app.main:app --host 127.0.0.1 --port 6969 --proxy-headers --forwarded-allow-ips=127.0.0.1
+   ```
+
+   Bind to loopback so Caddy is the only way in. `--proxy-headers` makes
+   `saved_by` record the phone's address rather than Caddy's.
+4. Caddyfile:
+
+   ```
+   repairs.ifpusa.com {
+       reverse_proxy 127.0.0.1:6969
+   }
+   ```
+
+   Caddy handles TLS and forwards `X-Forwarded-For`/`-Proto`. No auth config
+   in Caddy; the app does it.
+5. Health check: `GET /health` returns `{"ok": true}` without sign-in.
+
 ### Testing photo storage safely
 
 Never point a test at the live `Dwgs` share: every job folder there is real,

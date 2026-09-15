@@ -28,7 +28,21 @@
 
   // Phones have no domain login, so the technician picks their name once; it is
   // remembered on the device and sent with every upload as uploaded_by.
+  let signedIn = null;   // {user, name} when Windows sign-in is on
+
   async function loadTechnicians() {
+    try {
+      const me = await (await fetch("/api/me")).json();
+      if (me.auth_enabled && me.user) {
+        signedIn = me;
+        // Signed in with a domain account: no need to ask who they are.
+        tech.closest(".m-field").hidden = true;
+        $("#whoami").innerHTML = `Signed in as <b>${esc(me.name || me.user)}</b> · <a href="/logout">sign out</a>`;
+        $("#whoami").hidden = false;
+        updateButtons();
+        return;
+      }
+    } catch (_) { /* fall through to the picker */ }
     try {
       const cfg = await (await fetch("/api/config")).json();
       for (const t of cfg.technicians || []) {
@@ -47,7 +61,7 @@
   });
 
   function updateButtons() {
-    const ok = REPAIR_RE.test(current) && !!tech.value && folderOk;
+    const ok = REPAIR_RE.test(current) && (signedIn || !!tech.value) && folderOk;
     camBtn.disabled = galBtn.disabled = !ok;
   }
 
@@ -104,10 +118,10 @@
 
   function upload(files) {
     if (!files.length || !REPAIR_RE.test(current)) return;
-    if (!tech.value) { toast("Pick your name first", true); tech.focus(); return; }
+    if (!signedIn && !tech.value) { toast("Pick your name first", true); tech.focus(); return; }
     const fd = new FormData();
     fd.append("repair_no", current);
-    fd.append("uploaded_by", tech.value);
+    fd.append("uploaded_by", signedIn ? "" : tech.value);
     for (const f of files) fd.append("files", f, f.name || "photo.jpg");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/mobile/photos");
@@ -167,7 +181,7 @@
       status.innerHTML = `Enter the repair number, or continue with <button type="button" class="link-btn" id="use-last">${esc(last)}</button>`;
       $("#use-last").addEventListener("click", () => { repair.value = last; setRepair(last); });
     }
-    if (tech.value) repair.focus();
+    if (tech.value || signedIn) repair.focus();
   }
   loadRecent();
   setInterval(() => { if (REPAIR_RE.test(current)) loadLibrary(); }, 30000);

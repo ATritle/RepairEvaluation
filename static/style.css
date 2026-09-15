@@ -284,6 +284,10 @@ input.locked { background: #262626; color: var(--muted); cursor: not-allowed; }
 .shortcut-table td { padding: 5px 14px 5px 0; }
 
 /* ---------- Menu ---------- */
+.header-right { display: flex; align-items: center; gap: 14px; }
+.whoami { font-size: 13px; }
+.whoami b { color: var(--cyan); }
+.whoami a { color: var(--orange); }
 .menu { position: relative; }
 .menu-items {
   position: absolute; right: 0; top: 110%;

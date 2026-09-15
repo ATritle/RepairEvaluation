@@ -17,7 +17,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFi
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import forge, p21, photo_store
+from . import auth, forge, p21, photo_store
 from .config import (
     ALLOWED_IMAGE_EXT,
     APP_NAME,
@@ -61,13 +61,21 @@ def _page(name: str) -> FileResponse:
     return FileResponse(STATIC / name, headers={"Cache-Control": "no-cache"})
 
 
+# Windows AD sign-in + group gate + /health, /api/me, /logout. Added after the
+# cache middleware above so it wraps everything (middleware runs outermost-last-added).
+auth.install(app)
+
+
 def _who(request: Request, declared: Optional[str] = None) -> Optional[str]:
     """Identity recorded on saved_by / uploaded_by.
 
-    Precedence: a user header from an authenticating proxy (real identity) >
-    the technician the user picked in the UI (self-declared, must be on the
-    configured list) > the client address. The address is kept alongside a
-    declared name so a self-declared entry is still traceable."""
+    Precedence: the signed-in Windows account ('jsmith (John Smith)') >
+    a user header from an authenticating proxy > the technician picked in the
+    UI (self-declared, must be on the configured list, kept with the client
+    address so it is still traceable) > the client address."""
+    signed_in = auth.identity_label(request)
+    if signed_in:
+        return clean_text(signed_in, 100)
     for header in ("x-forwarded-user", "remote-user"):
         if request.headers.get(header):
             return clean_text(request.headers[header], 100) or None
@@ -280,7 +288,7 @@ async def api_mobile_upload(
     """Phone capture: repair number + one or more photos -> library. The phone
     has no domain user, so the technician picked on the page is recorded."""
     rn = _check_repair_no(repair_no)
-    if not clean_text(uploaded_by, 100):
+    if not auth.current_login(request) and not clean_text(uploaded_by, 100):
         raise HTTPException(status_code=400, detail="Pick who you are before uploading")
     return await _store_uploads(files, _who(request, uploaded_by), rn, "mobile")
 

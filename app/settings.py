@@ -24,10 +24,21 @@ class Settings(BaseSettings):
     forge_driver: str = "ODBC Driver 17 for SQL Server"
     forge_timeout: int = 10
 
-    # Photo bytes: "fs" = files under photo_fs_root (local folder now, UNC share
-    # later), "db" = VARBINARY in Forge.RepairEval.photo_file. Metadata is always in Forge.
+    # Photo bytes: "fs" = <photo_fs_root>\R36000\R36169\Photos\<file>.jpg (the Dwgs
+    # share), "db" = VARBINARY in Forge.RepairEval.photo_file. Metadata is always in Forge.
     photo_store: str = "fs"
     photo_fs_root: str = "data/photo_store"
+
+    # Windows AD sign-in (auth-middleware package). auth_enabled=False injects
+    # auth_dev_user on every request - local development only.
+    auth_enabled: bool = True
+    auth_domain: str = "IFP-EHA"
+    auth_group: str = ""                 # AD group required to use the app; blank = any domain user
+    auth_cookie_name: str = "repairs_session"
+    auth_cookie_secret: str = ""         # blank = generated once into data/auth_cookie_secret
+    auth_cookie_secure: bool = True      # False only when testing over plain http
+    auth_session_ttl: int = 28800        # 8 h, signed into the cookie
+    auth_dev_user: str = "dev-user"
 
     @property
     def forge_configured(self) -> bool:
