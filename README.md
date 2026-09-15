@@ -100,7 +100,8 @@ Evaluations live in the **Forge** database, schema **`RepairEval`**
 
 - **One evaluation per repair number.** The Repair # is the first field and
   doubles as the lookup: type it and matching evaluations appear; pick one to
-  load it. A number nobody has used starts a new evaluation.
+  load it. A number nobody has used starts a new evaluation. Typing just the
+  digits is fine: `36169` becomes `R36169` everywhere (form, phone page, API).
 - **Every Save is a new revision.** Nothing is updated in place. The banner
   above the form shows which revision is loaded; **History** lists all
   revisions and lets you view any of them. Saving while viewing an old

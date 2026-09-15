@@ -69,6 +69,7 @@
 
   function setRepair(v) {
     current = (v || "").trim().toUpperCase();
+    if (/^\d{4,7}$/.test(current)) { current = "R" + current; if (repair.value.trim().toUpperCase() !== current) repair.value = current; }
     const ok = REPAIR_RE.test(current);
     folderOk = false;
     updateButtons();

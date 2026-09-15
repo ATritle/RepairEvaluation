@@ -91,9 +91,12 @@ _REPAIR_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._/\-]{0,49}$")
 
 
 def _check_repair_no(repair_no: str) -> str:
-    """Validate and normalise a repair number. Upper-cased so the phone page,
-    the desktop form and the API all agree on the key."""
+    """Validate and normalise a repair number: upper-cased, and a bare number
+    gets its R prefix, so the phone page, the desktop form and the API all
+    agree on the key."""
     repair_no = clean_text(repair_no, 50).upper()
+    if re.fullmatch(r"\d{4,7}", repair_no):
+        repair_no = "R" + repair_no          # "36169" -> "R36169"
     if not _REPAIR_NO_RE.fullmatch(repair_no):
         raise HTTPException(status_code=400, detail="Repair # may only contain letters, digits, space, . _ / -")
     return repair_no

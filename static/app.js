@@ -180,7 +180,7 @@
   // A photo ref is "live:<file name>" (a file in the repair's Photos folder) or
   // "archive:<sha256>" (a frozen snapshot behind a saved revision).
   function photoRepairNo() {
-    return ($("#f-repair_no").value.trim() || state.repairNo || "").toUpperCase();
+    return normalizeRepairNo($("#f-repair_no").value) || state.repairNo || "";
   }
   function photoUrl(ref, thumb = false, repairNo = photoRepairNo()) {
     const i = ref.indexOf(":");
@@ -526,7 +526,7 @@
     for (const k of ["repair_no", "technician", "customer", "customer_contact", "customer_email", "model", "serial", "customer_po", "material"]) {
       data[k] = (data[k] || "").trim();
     }
-    data.repair_no = data.repair_no.toUpperCase();
+    data.repair_no = normalizeRepairNo(data.repair_no);
     data.customer_id = state.customerId;
     data.contact_id = state.contactId;
     data.email_override = state.emailOverride;
@@ -888,7 +888,7 @@
   const librarySelected = new Set();
 
   function currentRepairNo() {
-    return $("#f-repair_no").value.trim();
+    return normalizeRepairNo($("#f-repair_no").value);
   }
 
   async function refreshLibraryCount() {
@@ -1001,8 +1001,12 @@
     renderLibrary();
   });
   $("#show-deleted").addEventListener("change", openReportDialog);
+  function normalizeRepairNo(v) {
+    v = (v || "").trim().toUpperCase();
+    return /^\d{4,7}$/.test(v) ? "R" + v : v;     // "36169" -> "R36169"
+  }
   repairInput.addEventListener("change", () => {
-    const up = repairInput.value.trim().toUpperCase();
+    const up = normalizeRepairNo(repairInput.value);
     if (repairInput.value !== up) { repairInput.value = up; updateRevisionBanner(); }
     refreshLibraryCount();
   });
