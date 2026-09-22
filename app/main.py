@@ -44,6 +44,19 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 
 
 @app.middleware("http")
+async def lowercase_page_paths(request: Request, call_next):
+    """Windows users type /Mobile or /R/36169; route matching is case-sensitive,
+    so lower-case the first path segment for the page routes. API and file paths
+    are left alone (repair numbers are normalised separately)."""
+    path = request.scope.get("path", "")
+    first = path.split("/", 2)[1].lower() if path.count("/") >= 1 else ""
+    if first in ("mobile", "r", "health", "logout", "static", "assets") and not path.startswith("/" + first):
+        request.scope["path"] = "/" + first + path[len(first) + 1:]
+        request.scope["raw_path"] = request.scope["path"].encode()
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def cache_headers(request: Request, call_next):
     """Pages and our own JS/CSS must revalidate on every load so a deploy is
     picked up immediately (phones cache aggressively when no header is sent).
