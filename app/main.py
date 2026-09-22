@@ -44,19 +44,6 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 
 
 @app.middleware("http")
-async def lowercase_page_paths(request: Request, call_next):
-    """Windows users type /Mobile or /R/36169; route matching is case-sensitive,
-    so lower-case the first path segment for the page routes. API and file paths
-    are left alone (repair numbers are normalised separately)."""
-    path = request.scope.get("path", "")
-    first = path.split("/", 2)[1].lower() if path.count("/") >= 1 else ""
-    if first in ("mobile", "r", "health", "logout", "static", "assets") and not path.startswith("/" + first):
-        request.scope["path"] = "/" + first + path[len(first) + 1:]
-        request.scope["raw_path"] = request.scope["path"].encode()
-    return await call_next(request)
-
-
-@app.middleware("http")
 async def cache_headers(request: Request, call_next):
     """Pages and our own JS/CSS must revalidate on every load so a deploy is
     picked up immediately (phones cache aggressively when no header is sent).
@@ -78,6 +65,21 @@ def _page(name: str) -> FileResponse:
 # Windows AD sign-in + group gate + /health, /api/me, /logout. Added after the
 # cache middleware above so it wraps everything (middleware runs outermost-last-added).
 auth.install(app)
+
+
+@app.middleware("http")
+async def lowercase_page_paths(request: Request, call_next):
+    """Windows users type /Mobile or /R/36169/V2; route matching is case-sensitive.
+    Page routes (and the exempt /health, /static, /assets) are lower-cased whole;
+    repair numbers are upper-cased again by the app. Added last so it runs before
+    sign-in, which needs the exempt paths to match too."""
+    path = request.scope.get("path", "")
+    first = path.split("/", 2)[1].lower() if "/" in path else ""
+    if first in ("mobile", "r", "health", "logout", "static", "assets") and path != path.lower():
+        lowered = path.lower() if first in ("mobile", "r", "health", "logout") else "/" + first + path[len(first) + 1:]
+        request.scope["path"] = lowered
+        request.scope["raw_path"] = lowered.encode()
+    return await call_next(request)
 
 
 def _who(request: Request, declared: Optional[str] = None) -> Optional[str]:
