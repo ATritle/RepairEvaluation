@@ -115,17 +115,23 @@ def _pdf_image_path(photo: dict, temp_dir: str) -> Path:
 
     `photo["local_path"]` is filled in by the caller (main.py) - the resolved
     file on the share for this photo's reference."""
-    source = Path(photo.get("local_path") or "")
+    local = photo.get("local_path") or ""
     rotation = int(photo.get("rotation", 0)) % 360
     annotations = photo.get("annotations", []) or []
 
-    if not source or not source.exists():
+    # Note Path("") is "." which exists - check the string first.
+    if not local or not Path(local).is_file():
         return Path(temp_dir) / "missing.jpg"   # does not exist -> "Image unavailable"
+    source = Path(local)
 
     existing = list(Path(temp_dir).glob("annotated_*"))
     output = Path(temp_dir) / f"annotated_{len(existing):04d}.jpg"
 
-    with PILImage.open(source) as im:
+    try:
+        im0 = PILImage.open(source)
+    except Exception:
+        return Path(temp_dir) / "missing.jpg"   # unreadable file -> "Image unavailable"
+    with im0 as im:
         try:
             from PIL import ImageOps
             im = ImageOps.exif_transpose(im)

@@ -236,7 +236,10 @@ async def _freeze_photos(repair_no: str, report: Report) -> list[dict]:
                 sha, rel = val, photos.rel_to_root(path)
                 source_name = p.name
         except photos.PhotoNotFound as exc:
-            raise HTTPException(status_code=400, detail=f"Photo '{p.name or val}': {exc}") from exc
+            raise HTTPException(status_code=400, detail={
+                "missing_photo": p.ref, "name": p.name or val,
+                "message": f"Photo '{p.name or val}' is no longer in the folder: {exc}",
+            }) from exc
         out.append({
             "sha256": sha, "archive_path": rel, "source_name": source_name,
             "description": p.description, "rotation": p.rotation,

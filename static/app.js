@@ -344,7 +344,7 @@
         ctx.fillStyle = "#fff";
         ctx.font = "14px Segoe UI, Arial";
         ctx.textAlign = "center";
-        ctx.fillText(this.failed ? "Unable to load image" : "Loading image…", cw / 2, ch / 2);
+        ctx.fillText(this.failed ? "Photo missing from the folder (removed or renamed)" : "Loading image…", cw / 2, ch / 2);
         this.rect = null;
         return;
       }
@@ -622,6 +622,21 @@
         } else {
           throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
         }
+      }
+      if (res.status === 400) {
+        // A photo on the report vanished from the folder (removed on the phone, renamed
+        // in Explorer, snapshot deleted). Offer to drop it and save the rest.
+        let d = null;
+        try { d = (await res.json()).detail; } catch (_) { /* ignore */ }
+        if (d && d.missing_photo) {
+          const ok = await confirmDialog("A photo is missing",
+            `${d.message} Remove it from the report and save the rest?`);
+          if (!ok) { setStatus("Save cancelled"); return; }
+          state.photos = state.photos.filter((ph) => ph.ref !== d.missing_photo);
+          renderPhotos();
+          return saveReport();
+        }
+        throw new Error(d && d.message ? d.message : (typeof d === "string" ? d : "Bad request"));
       }
       if (!res.ok) {
         let detail = res.statusText;
